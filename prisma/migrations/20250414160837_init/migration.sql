@@ -27,7 +27,7 @@ CREATE TABLE "Tenant" (
     "status" "TenantStatus" NOT NULL DEFAULT 'ACTIVE',
     "subscriptionPlan" TEXT NOT NULL,
     "monthlyCharge" DOUBLE PRECISION NOT NULL,
-    "numberOfBags" INTEGER,
+    "paymentDetails" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
     "email" TEXT,
@@ -43,6 +43,34 @@ CREATE TABLE "Tenant" (
     "allowedUsers" INTEGER NOT NULL DEFAULT 1,
 
     CONSTRAINT "Tenant_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "TenantInvoice" (
+    "id" TEXT NOT NULL,
+    "tenantId" INTEGER NOT NULL,
+    "invoicePeriod" TIMESTAMP(3) NOT NULL,
+    "invoiceNumber" TEXT NOT NULL,
+    "invoiceAmount" DOUBLE PRECISION NOT NULL,
+    "status" "InvoiceStatus" NOT NULL DEFAULT 'UNPAID',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "amountPaid" DOUBLE PRECISION NOT NULL DEFAULT 0,
+
+    CONSTRAINT "TenantInvoice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "TenantPayment" (
+    "id" TEXT NOT NULL,
+    "tenantInvoiceId" TEXT NOT NULL,
+    "tenantId" INTEGER NOT NULL,
+    "amount" DOUBLE PRECISION NOT NULL,
+    "modeOfPayment" "ModeOfPayment" NOT NULL,
+    "transactionId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "TenantPayment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -62,12 +90,25 @@ CREATE TABLE "User" (
     "createdBy" INTEGER,
     "status" "UserStatus" NOT NULL DEFAULT 'ACTIVE',
     "mfaEnabled" BOOLEAN NOT NULL DEFAULT false,
-    "bagsHeld" INTEGER,
-    "originalBagsIssued" INTEGER,
+    "lastLogin" TIMESTAMP(3) NOT NULL,
+    "loginCount" INTEGER NOT NULL DEFAULT 0,
+    "resetCode" TEXT,
+    "resetCodeExpiresAt" TIMESTAMP(3),
+    "otpAttempts" INTEGER NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "User_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "UserActivity" (
+    "id" SERIAL NOT NULL,
+    "userId" INTEGER NOT NULL,
+    "action" TEXT NOT NULL,
+    "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "UserActivity_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -131,7 +172,6 @@ CREATE TABLE "Customer" (
     "category" TEXT,
     "monthlyCharge" DOUBLE PRECISION NOT NULL,
     "status" "CustomerStatus" NOT NULL DEFAULT 'ACTIVE',
-    "garbageCollectionDay" TEXT NOT NULL,
     "collected" BOOLEAN NOT NULL DEFAULT false,
     "closingBalance" DOUBLE PRECISION NOT NULL,
     "trashBagsIssued" BOOLEAN NOT NULL DEFAULT false,
@@ -225,18 +265,9 @@ CREATE TABLE "Notification" (
 );
 
 -- CreateTable
-CREATE TABLE "UserActivity" (
-    "id" SERIAL NOT NULL,
-    "userId" INTEGER NOT NULL,
-    "action" TEXT NOT NULL,
-    "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-    CONSTRAINT "UserActivity_pkey" PRIMARY KEY ("id")
-);
-
--- CreateTable
 CREATE TABLE "SMS" (
     "id" TEXT NOT NULL,
+    "tenantId" INTEGER NOT NULL,
     "clientsmsid" TEXT NOT NULL,
     "mobile" TEXT NOT NULL,
     "message" TEXT NOT NULL,
@@ -298,6 +329,7 @@ CREATE TABLE "TrashBagIssuance" (
     "taskId" INTEGER NOT NULL,
     "customerId" TEXT NOT NULL,
     "tenantId" INTEGER NOT NULL,
+    "issuedById" INTEGER,
     "issuedDate" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "bagsIssued" INTEGER NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -311,6 +343,12 @@ CREATE TABLE "_CreatedUsers" (
     "A" INTEGER NOT NULL,
     "B" INTEGER NOT NULL
 );
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TenantInvoice_invoiceNumber_key" ON "TenantInvoice"("invoiceNumber");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "TenantPayment_transactionId_key" ON "TenantPayment"("transactionId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
@@ -329,6 +367,18 @@ CREATE UNIQUE INDEX "MPESAConfig_shortCode_key" ON "MPESAConfig"("shortCode");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Customer_phoneNumber_key" ON "Customer"("phoneNumber");
+
+-- CreateIndex
+CREATE INDEX "Customer_tenantId_idx" ON "Customer"("tenantId");
+
+-- CreateIndex
+CREATE INDEX "Customer_phoneNumber_idx" ON "Customer"("phoneNumber");
+
+-- CreateIndex
+CREATE INDEX "Customer_email_idx" ON "Customer"("email");
+
+-- CreateIndex
+CREATE INDEX "Customer_status_idx" ON "Customer"("status");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Invoice_invoiceNumber_key" ON "Invoice"("invoiceNumber");
@@ -355,13 +405,28 @@ CREATE INDEX "Task_tenantId_idx" ON "Task"("tenantId");
 CREATE UNIQUE INDEX "TaskAssignee_taskId_assigneeId_key" ON "TaskAssignee"("taskId", "assigneeId");
 
 -- CreateIndex
+CREATE INDEX "TrashBagIssuance_issuedById_idx" ON "TrashBagIssuance"("issuedById");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "_CreatedUsers_AB_unique" ON "_CreatedUsers"("A", "B");
 
 -- CreateIndex
 CREATE INDEX "_CreatedUsers_B_index" ON "_CreatedUsers"("B");
 
 -- AddForeignKey
+ALTER TABLE "TenantInvoice" ADD CONSTRAINT "TenantInvoice_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantPayment" ADD CONSTRAINT "TenantPayment_tenantInvoiceId_fkey" FOREIGN KEY ("tenantInvoiceId") REFERENCES "TenantInvoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TenantPayment" ADD CONSTRAINT "TenantPayment_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "User" ADD CONSTRAINT "User_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserActivity" ADD CONSTRAINT "UserActivity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -412,7 +477,7 @@ ALTER TABLE "Notification" ADD CONSTRAINT "Notification_tenantId_fkey" FOREIGN K
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "UserActivity" ADD CONSTRAINT "UserActivity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+ALTER TABLE "SMS" ADD CONSTRAINT "SMS_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "MPESATransactions" ADD CONSTRAINT "MPESATransactions_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -440,6 +505,9 @@ ALTER TABLE "TrashBagIssuance" ADD CONSTRAINT "TrashBagIssuance_customerId_fkey"
 
 -- AddForeignKey
 ALTER TABLE "TrashBagIssuance" ADD CONSTRAINT "TrashBagIssuance_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TrashBagIssuance" ADD CONSTRAINT "TrashBagIssuance_issuedById_fkey" FOREIGN KEY ("issuedById") REFERENCES "TaskAssignee"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "_CreatedUsers" ADD CONSTRAINT "_CreatedUsers_A_fkey" FOREIGN KEY ("A") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

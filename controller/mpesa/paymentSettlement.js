@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient,InvoiceStatus } = require('@prisma/client');
 const { sendSMS } = require('../sms/sms');
 
 const prisma = new PrismaClient();
@@ -201,7 +201,7 @@ async function processInvoices(paymentAmount, customerId, paymentId, tenantId) {
             customerId,
             tenantId,
             status: {
-                in: ['UNPAID', 'PPAID'],
+                in: [InvoiceStatus.UNPAID, InvoiceStatus.PPAID],
             },
         },
         orderBy: { createdAt: 'asc' }, // Process oldest invoices first
@@ -260,7 +260,7 @@ async function processInvoices(paymentAmount, customerId, paymentId, tenantId) {
             where: { id: invoice.id },
             data: {
                 amountPaid: invoice.amountPaid + paymentForInvoice,
-                status: invoice.amountPaid + paymentForInvoice >= invoice.invoiceAmount ? 'PAID' : 'PPAID',
+                status: invoice.amountPaid + paymentForInvoice >= invoice.invoiceAmount ?  InvoiceStatus.PAID : InvoiceStatus.PPAID,
             },
         });
 

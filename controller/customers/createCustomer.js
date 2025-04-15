@@ -1,50 +1,46 @@
-const { PrismaClient,CustomerStatus } = require('@prisma/client'); // Import the enum
+const { PrismaClient, CustomerStatus } = require('@prisma/client');
 const prisma = new PrismaClient();
-// Create a new customer
+
+
 
 const createCustomer = async (req, res) => {
+  const { tenantId } = req.user;
   const {
-    tenantId,
+    buildingId,
     firstName,
     lastName,
     email,
     phoneNumber,
     secondaryPhoneNumber,
-    gender,
-    county,
-    town,
-    location,
-    estateName,
-    building,
     houseNumber,
-    category,
     monthlyCharge,
-    garbageCollectionDay,
-    collected,
+    garbageCharge,
+    serviceCharge,
     closingBalance,
     status,
-    trashBagsIssued
-
   } = req.body;
 
   // Validate required fields
-  if (!tenantId || !firstName || !lastName || !phoneNumber || !monthlyCharge || !garbageCollectionDay) {
-    return res.status(400).json({ message: 'Required fields are missing.' });
+  if (!tenantId || !buildingId || !firstName || !lastName || !phoneNumber || !monthlyCharge) {
+    return res.status(400).json({
+      message: 'Required fields: tenantId, buildingId, firstName, lastName, phoneNumber, monthlyCharge.',
+    });
   }
 
   // Validate status
-  const validStatuses = Object.values(CustomerStatus);
+  const validStatuses = ['ACTIVE', 'INACTIVE']; // Adjust based on CustomerStatus enum
   if (status && !validStatuses.includes(status)) {
-    return res.status(400).json({ message: `Invalid status value. Valid values: ${validStatuses.join(', ')}` });
+    return res.status(400).json({
+      message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
+    });
   }
 
-  // Validate garbage collection day
-
-
-  // Validate location format
-  const locationPattern = /^-?\d+\.\d+,-?\d+\.\d+$/;
-  if (location && !locationPattern.test(location)) {
-    return res.status(400).json({ message: 'Invalid location format. Please use "latitude,longitude".' });
+  // Validate numeric fields
+  const numericFields = { monthlyCharge, garbageCharge, serviceCharge, closingBalance };
+  for (const [field, value] of Object.entries(numericFields)) {
+    if (value !== undefined && (isNaN(value) || value < 0)) {
+      return res.status(400).json({ message: `${field} must be a non-negative number.` });
+    }
   }
 
   try {
@@ -62,6 +58,15 @@ const createCustomer = async (req, res) => {
       return res.status(403).json({ message: 'User does not belong to the specified tenant.' });
     }
 
+    // Check if building exists and belongs to tenant
+    const building = await prisma.building.findUnique({
+      where: { id: buildingId },
+    });
+
+    if (!building || building.tenantId !== tenantId) {
+      return res.status(404).json({ message: 'Building not found or does not belong to tenant.' });
+    }
+
     // Check if phone number already exists
     const existingCustomer = await prisma.customer.findUnique({
       where: { phoneNumber },
@@ -75,25 +80,18 @@ const createCustomer = async (req, res) => {
     const customer = await prisma.customer.create({
       data: {
         tenantId,
+        buildingId,
         firstName,
         lastName,
         email,
         phoneNumber,
         secondaryPhoneNumber,
-        gender,
-        county,
-        town,
-        location,
-        estateName,
-        building,
         houseNumber,
-        category,
-        monthlyCharge:parseFloat(monthlyCharge),
-        garbageCollectionDay,
-        trashBagsIssued :trashBagsIssued?? false,
-        status: status ?? 'ACTIVE', // Use default if not provided
-        collected: collected ?? false, // Default to false
-        closingBalance:parseFloat(closingBalance) ?? 0, // Default to 0
+        monthlyCharge: parseFloat(monthlyCharge),
+        garbageCharge: garbageCharge ? parseFloat(garbageCharge) : null,
+        serviceCharge: serviceCharge ? parseFloat(serviceCharge) : null,
+        status: status ?? 'ACTIVE',
+        closingBalance: closingBalance ? parseFloat(closingBalance) : 0,
       },
     });
 
@@ -101,14 +99,14 @@ const createCustomer = async (req, res) => {
   } catch (error) {
     console.error('Error creating customer:', error);
 
-    // Handle unique constraint violation (e.g., phoneNumber)
+    // Handle unique constraint violation
     if (error.code === 'P2002' && error.meta?.target.includes('phoneNumber')) {
       return res.status(400).json({ message: 'Phone number must be unique.' });
     }
 
-    // Handle other errors
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
 
 module.exports = { createCustomer };

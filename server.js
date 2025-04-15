@@ -29,6 +29,12 @@ const tenantRoute = require('./routes/tenant/tenantRoute.js')
 
 const mpesaSettings = require('./routes/mpesa/mpesaConfig.js')
 
+const buildingRoute = require('./routes/building/buildingRoute.js')
+
+const landlordRoute = require('./routes/landlord/landlordRoute.js')
+
+const utilitiesReadings = require('./routes/utilitiesReadingsRoute/utilitiesReadingRoute.js')
+
 const taskRoute = require('./routes/tasks/tasks.js')
 const cookieParser = require('cookie-parser');
 
@@ -117,6 +123,12 @@ app.use('/api', mpesaSettings);
 app.use('/api', tenantRoute); 
 
 app.use('/api', taskRoute);
+
+app.use('/api', buildingRoute); //done
+
+app.use('/api', landlordRoute); //done
+
+app.use('/api', utilitiesReadings); //done
 
 
 

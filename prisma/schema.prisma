@@ -22,7 +22,7 @@ model Tenant {
   status            TenantStatus     @default(ACTIVE)
   subscriptionPlan  String           // Plan name e.g., 'Ndovu', 'Simba', 'Nyati'
   monthlyCharge     Float 
-  numberOfBags       Int?  
+ 
   paymentDetails      String?           
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
@@ -68,14 +68,18 @@ model Tenant {
 
   Task Task[]
 
-  TrashBagIssuance TrashBagIssuance[]
+
 
   tenantInvoices  TenantInvoice[]    // Add this relation
   tenantPayments  TenantPayment[]
 
   SMS SMS[]
 
-  GarbageCollection GarbageCollection[]
+
+
+  Building Building[]
+
+  Landlord Landlord[]
 }
 
 
@@ -139,8 +143,7 @@ model User {
   status              UserStatus @default(ACTIVE)
   mfaEnabled          Boolean   @default(false)
 
-  bagsHeld            Int?     
-  originalBagsIssued  Int? 
+
   lastLogin           DateTime    // Stores last login time
   loginCount          Int @default(0) // Tracks login frequency
 
@@ -169,7 +172,6 @@ model User {
 
   Task Task[]
 
-  GarbageCollection GarbageCollection[]
 }
 
 
@@ -244,78 +246,162 @@ model MPESAConfig {
   MPESATransaction MPESATransactions[]
 }
 
-// Customer model representing customers served by the tenant
-model Customer {
-  id                    String                    @id @default(uuid())
-  tenantId              Int
-  firstName             String
-  lastName              String
-  email                 String?               
-  phoneNumber           String                @unique
-  secondaryPhoneNumber  String?
-  gender                String?
-  county                String?
-  town                  String?
-  location              String?
-  estateName            String?               // Optional estate name
-  building              String?               // Optional building name
-  houseNumber           String?               // Optional house number
-  category              String?
-  monthlyCharge         Float
-  status                CustomerStatus        @default(ACTIVE)
-  garbageCollectionDay   String  // Day of the week for collection
-  collected             Boolean               @default(false)
-  closingBalance        Float                 // Closing balance field
-  trashBagsIssued       Boolean               @default(false) // Track if bags issued this month
+model Landlord {
+  id                String           @id @default(uuid())
+  tenantId          Int              // Links to tenant for multi-tenant app
+  firstName         String
+  lastName          String
+  email             String?          @unique
+  phoneNumber       String           @unique
+  status            LandlordStatus   @default(ACTIVE)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  buildings         Building[]
 
-  // Relationships
-  tenant                Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  invoices              Invoice[]
-  receipts              Receipt[]
-  trashbagsHistory      TrashBagIssuance[]
-
-  createdAt             DateTime               @default(now())
-  updatedAt             DateTime               @updatedAt
-
- 
-
-
-
-
-
-  GarbageCollection GarbageCollection[]
-
-  @@index([tenantId]) // Index for faster queries by tenant
-  @@index([phoneNumber]) // Index for faster queries by phone number
-  @@index([email]) // Index for faster queries by email
-  @@index([status]) // Index for faster queries by status
+  @@index([tenantId])
+  @@index([phoneNumber])
+  @@index([email])
 }
 
-// Invoice model
+// Building model
+model Building {
+  id                String           @id @default(uuid())
+  tenantId          Int
+  landlordId        String
+  name              String           // e.g., "Sunset Apartments"
+  address           String?          // e.g., "123 Main St"
+  unitCount         Int?             // Optional: total units in building
+  gasRate           Float?           // e.g., 50 KES per cubic meter
+  waterRate         Float?           // e.g., 1.2 KES per liter
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  landlord          Landlord         @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  customers         Customer[]       // Tenants in this building
+
+  @@index([tenantId])
+  @@index([landlordId])
+  @@index([name])
+}
+
+// Enum for landlord status
+enum LandlordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+
+
+  model Customer {
+    id                    String           @id @default(uuid())
+    tenantId              Int
+    buildingId            String?          // Links to building (optional if not assigned)
+    firstName             String
+    lastName              String
+    email                 String?
+    phoneNumber           String           @unique
+    secondaryPhoneNumber  String?
+    houseNumber           String?          // Unit number, e.g., "A12"
+    monthlyCharge         Float            // Base rent
+    garbageCharge         Float?           // Fixed monthly garbage fee
+    serviceCharge         Float?           // Fixed monthly service charge
+    status                CustomerStatus   @default(ACTIVE)
+    closingBalance        Float            @default(0)
+    createdAt             DateTime         @default(now())
+    updatedAt             DateTime         @updatedAt
+
+    tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+    building              Building?        @relation(fields: [buildingId], references: [id], onDelete: SetNull)
+    invoices              Invoice[]
+    payments              Payment[]
+    taskAssignees         TaskAssignee[]
+    gasConsumptions       GasConsumption[]
+    waterConsumptions     WaterConsumption[]
+
+    @@index([tenantId])
+    @@index([buildingId])
+    @@index([phoneNumber])
+    @@index([email])
+    @@index([status])
+    Receipt Receipt[]
+  }
+
+
+// GasConsumption model
+model GasConsumption {
+  id            String    @id @default(uuid())
+  customerId    String
+  period        DateTime  // e.g., "2025-02-01"
+  consumption   Float     // e.g., 10 cubic meters
+
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, period])
+}
+
+// WaterConsumption model
+model WaterConsumption {
+  id            String    @id @default(uuid())
+  customerId    String
+  period        DateTime  // e.g., "2025-02-01"
+  consumption   Float     // e.g., 1000 liters
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  @@index([customerId, period])
+}
+// Enum for customer status
+enum CustomerStatus {
+  ACTIVE
+  INACTIVE
+}
+
+// Invoice model for customer billing
 
 // Invoice model
 model Invoice {
-  id                  String       @id @default(uuid())
-  tenantId             Int  
-  customerId          String
-  invoicePeriod       DateTime
-  invoiceNumber       String       @unique 
-  invoiceAmount       Float        
-  closingBalance      Float        
-  status              InvoiceStatus @default(UNPAID) 
-  isSystemGenerated   Boolean    
-  createdAt           DateTime     @default(now())  
-  amountPaid          Float        @default(0) 
+  id                    String          @id @default(uuid())
+  tenantId              Int
+  customerId            String
+  invoicePeriod         DateTime
+  invoiceNumber         String          @unique
+  invoiceAmount         Float
+  isSystemGenerated     Boolean         @default(true)
+  createdBy             String          @default("System")
+  status                InvoiceStatus   @default(UNPAID)
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+  amountPaid            Float           @default(0)
+  closingBalance        Float           @default(0)
 
-  customer            Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  items               InvoiceItem[]
-  receiptInvoices     ReceiptInvoice[] @relation("InvoiceReceipts")
- 
+  tenant                Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer              Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  payments              Payment[]
+  InvoiceItem           InvoiceItem[]
+  ReceiptInvoice        ReceiptInvoice[] @relation("InvoiceReceipts")
 }
 
+// InvoiceItem model
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  description String
+  amount      Float
+  quantity    Int
+
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+
+
+// Enum for invoice status
 enum InvoiceStatus {
   UNPAID
   PAID
@@ -323,16 +409,43 @@ enum InvoiceStatus {
   CANCELLED
 }
 
-// InvoiceItem model
-model InvoiceItem {
-  id          String   @id @default(uuid())
-  invoiceId   String
-  description String   
-  amount      Float    
-  quantity    Int      
+// Payment model for customer payments
+model Payment {
+  id             String      @id @default(uuid())
+  tenantId       Int
+  amount         Float
+  modeOfPayment  ModeOfPayment
+  firstName      String?
+  receipted      Boolean     @default(false)
+  transactionId  String     @unique 
+  ref            String?  
+  receiptId       String?
 
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  receipt        Receipt?    
+  createdAt      DateTime    @default(now()) 
+   tenant  Tenant @relation(fields: [tenantId],references: [id])
+
+  Invoice Invoice[]
+
+  Customer Customer[]
 }
+
+// Enum for payment methods
+enum ModeOfPayment {
+  CASH
+  MPESA
+  BANK_TRANSFER
+  CREDIT_CARD
+  DEBIT_CARD
+}
+
+
+
+
+
+
+
+
 
 // Receipt model
 model Receipt {
@@ -371,51 +484,15 @@ model ReceiptInvoice {
 
 
 
-// Enum for payment methods
-enum ModeOfPayment {
-  CASH
-  MPESA
-  BANK_TRANSFER
-  CREDIT_CARD
-  DEBIT_CARD
-}
 
 
 
-model Payment {
-  id             String      @id @default(uuid())
-  tenantId       Int
-  amount         Float
-  modeOfPayment  ModeOfPayment
-  firstName      String?
-  receipted      Boolean     @default(false)
-  transactionId  String     @unique 
-  ref            String?  
-  receiptId       String?
-
-  receipt        Receipt?    
-  createdAt      DateTime    @default(now()) 
-   tenant  Tenant @relation(fields: [tenantId],references: [id])
-}
 
 
 
-// Enum for customer status
-enum CustomerStatus {
-  ACTIVE
-  INACTIVE
-}
 
-// Enum for garbage collection day
-// enum GarbageCollectionDay {
-//   MONDAY
-//   TUESDAY
-//   WEDNESDAY
-//   THURSDAY
-//   FRIDAY
-//   SATURDAY
-//   SUNDAY
-// }
+
+
 
 // Notification model for user alerts and notifications
 model Notification {
@@ -471,25 +548,7 @@ model MPESATransactions {
 
 
 
-model GarbageCollection {
-  id            String    @id @default(uuid())
-  tenantId      Int
-  customerId    String
-  taskId        Int?      // Optional link to a task
-  collectedBy   Int?      // Optional user who performed the collection
-  collectionDate DateTime @default(now()) // When the garbage was collected
-  notes         String?   // Optional notes
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
 
-  // Relationships
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  task          Task?     @relation(fields: [taskId], references: [id], onDelete: SetNull)
-  collector     User?     @relation(fields: [collectedBy], references: [id], onDelete: SetNull)
-
-  @@index([customerId]) // Index for faster queries by customer
-}
 
 model Task {
   id              Int            @id @default(autoincrement())
@@ -509,10 +568,9 @@ model Task {
   tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   creator         User           @relation(fields: [createdBy], references: [id], onDelete: Cascade)
   taskAssignees   TaskAssignee[] // Users assigned to this task
-  trashBagIssuances TrashBagIssuance[] // Issuances related to this task (if applicable)
 
   @@index([tenantId]) // Index for tenant-level filtering
-  GarbageCollection GarbageCollection[]
+
 }
 
 model TaskAssignee {
@@ -526,7 +584,8 @@ model TaskAssignee {
   assignee   User     @relation(fields: [assigneeId], references: [id], onDelete: Cascade)
   
   @@unique([taskId, assigneeId]) // Ensure a user cannot be assigned the same task multiple times
-  TrashBagIssuance TrashBagIssuance[]
+
+  Customer Customer[]
 }
 
 enum TaskType {
@@ -546,22 +605,3 @@ enum TaskStatus {
 
 
 
-model TrashBagIssuance {
-  id            String   @id @default(uuid())
-  taskId        Int      // Foreign key linking to Task
-  customerId    String   // Foreign key linking to Customer
-  tenantId      Int      // Foreign key linking to Tenant
-  issuedById    Int?     // Foreign key linking to TaskAssignee (the assignee who issued the bags)
-  issuedDate    DateTime @default(now()) // When bags were issued
-  bagsIssued    Int      // Number of bags issued
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  // Relationships
-  task          Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  issuedBy      TaskAssignee? @relation(fields: [issuedById], references: [id], onDelete: SetNull)
-
-  @@index([issuedById]) // Optional: Index for faster queries by issuer
-}

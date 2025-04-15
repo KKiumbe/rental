@@ -11,7 +11,7 @@ const { clearCustomerData } = require('../../controller/customers/delete/delete.
 
 
 
-const router = express.Router();
+const   router = express.Router();
 
 // Route to create a new customer
 router.post(

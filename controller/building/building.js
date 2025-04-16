@@ -1,4 +1,4 @@
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, UnitStatus  } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 
@@ -69,6 +69,182 @@ const createBuilding = async (req, res) => {
 
 
 
+const createUnit = async (req, res) => {
+  const { tenantId, user } = req.user; // Extract tenantId and user ID from authenticated user
+  const { buildingId, unitNumber, monthlyCharge, depositAmount, garbageCharge, serviceCharge, status } = req.body;
+
+  // Validate required fields
+  if (!tenantId || !buildingId || !unitNumber || monthlyCharge == null || depositAmount == null) {
+    return res.status(400).json({
+      success: false,
+      message: 'Required fields: tenantId, buildingId, unitNumber, monthlyCharge, depositAmount.',
+    });
+  }
+
+  // Validate monthlyCharge and depositAmount
+  if (monthlyCharge < 0 || depositAmount < 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'monthlyCharge and depositAmount must be non-negative.',
+    });
+  }
+
+  // Validate optional charges
+  if (garbageCharge != null && garbageCharge < 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'garbageCharge must be non-negative.',
+    });
+  }
+  if (serviceCharge != null && serviceCharge < 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'serviceCharge must be non-negative.',
+    });
+  }
+
+  // Validate status
+  const validStatuses = Object.values(UnitStatus);
+  if (status && !validStatuses.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
+    });
+  }
+
+  try {
+    // Check if tenant exists
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found.',
+      });
+    }
+
+    // Check if authenticated user exists and belongs to the tenant
+    const currentUser = await prisma.user.findUnique({
+      where: { id: user },
+      select: { tenantId: true, firstName: true, lastName: true },
+    });
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Authenticated user not found.',
+      });
+    }
+    if (currentUser.tenantId !== tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: 'User does not belong to the specified tenant.',
+      });
+    }
+
+    // Check if building exists and belongs to the tenant
+    const building = await prisma.building.findUnique({
+      where: { id: buildingId },
+    });
+    if (!building || building.tenantId !== tenantId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Building not found or does not belong to the tenant.',
+      });
+    }
+
+    // Check for duplicate unitNumber within the building
+    const existingUnit = await prisma.unit.findFirst({
+      where: {
+        buildingId,
+        unitNumber,
+      },
+    });
+    if (existingUnit) {
+      return res.status(400).json({
+        success: false,
+        message: `Unit number ${unitNumber} already exists in this building.`,
+      });
+    }
+
+    // Create unit
+    const unit = await prisma.unit.create({
+      data: {
+        tenantId,
+        buildingId,
+        unitNumber,
+        monthlyCharge,
+        depositAmount,
+        garbageCharge: garbageCharge || null,
+        serviceCharge: serviceCharge || null,
+        status: status || 'VACANT',
+      },
+    });
+
+    // Update building unitCount
+    await prisma.building.update({
+      where: { id: buildingId },
+      data: { unitCount: { increment: 1 } },
+    });
+
+    // Log user activity
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: user } },
+        tenant: { connect: { id: tenantId } },
+        action: `CREATED UNIT ${unitNumber} IN BUILDING ${building.name}`,
+        timestamp: new Date(),
+      },
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Unit created successfully',
+      data: unit,
+    });
+  } catch (error) {
+    console.error('Error creating unit:', error);
+
+    // Handle unique constraint violation
+    if (error.code === 'P2002') {
+      const target = error.meta?.target;
+      if (target?.includes('unitNumber')) {
+        return res.status(400).json({
+          success: false,
+          message: `Unit number ${unitNumber} already exists in this building.`,
+        });
+      }
+    }
+
+    // Handle Prisma validation error
+    if (error.name === 'PrismaClientValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid data provided for unit creation.',
+      });
+    }
+
+    // Handle relation errors
+    if (error.code === 'P2025') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant, user, or building reference.',
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  } finally {
+    await prisma.$disconnect();
+  }
+};
+
+
+
+
+
 
 
 const searchBuildings = async (req, res) => {
@@ -111,4 +287,4 @@ const searchBuildings = async (req, res) => {
 
 
 
-module.exports = { createBuilding, searchBuildings };
+module.exports = { createBuilding, searchBuildings ,createUnit};

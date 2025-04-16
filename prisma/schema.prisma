@@ -80,6 +80,12 @@ model Tenant {
   Building Building[]
 
   Landlord Landlord[]
+
+  Deposit Deposit[]
+
+  Unit Unit[]
+
+  UserActivity UserActivity[]
 }
 
 
@@ -178,8 +184,11 @@ model User {
 model UserActivity {
   id          Int       @id @default(autoincrement())
   userId      Int
+  tenantId     Int
   action      String    // e.g., 'LOGIN', 'LOGOUT', 'VIEW'
   timestamp   DateTime  @default(now())
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
 
   // Relationships
   user        User      @relation(fields: [userId], references: [id])
@@ -285,6 +294,7 @@ model Building {
   @@index([tenantId])
   @@index([landlordId])
   @@index([name])
+  Unit Unit[]
 }
 
 // Enum for landlord status
@@ -294,40 +304,96 @@ enum LandlordStatus {
 }
 
 
+model Unit {
+  id                String          @id @default(uuid())
+  tenantId          Int             // Links to tenant
+  buildingId        String          // Links to building
+  unitNumber        String          // e.g., "A12"
+  monthlyCharge     Float           // Monthly rent for this unit
+  depositAmount     Float           // Deposit required for this unit
+  garbageCharge     Float?          // Optional fixed monthly garbage fee
+  serviceCharge     Float?          // Optional fixed monthly service charge
+  status            UnitStatus      @default(VACANT) // e.g., VACANT, OCCUPIED
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  building          Building        @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  customers         Customer[]      // Customers assigned to this unit
+  @@index([tenantId])
+  @@index([buildingId])
+  @@index([unitNumber])
+  Invoice Invoice[]
+}
 
-  model Customer {
-    id                    String           @id @default(uuid())
-    tenantId              Int
-    buildingId            String?          // Links to building (optional if not assigned)
-    firstName             String
-    lastName              String
-    email                 String?
-    phoneNumber           String           @unique
-    secondaryPhoneNumber  String?
-    houseNumber           String?          // Unit number, e.g., "A12"
-    monthlyCharge         Float            // Base rent
-    garbageCharge         Float?           // Fixed monthly garbage fee
-    serviceCharge         Float?           // Fixed monthly service charge
-    status                CustomerStatus   @default(ACTIVE)
-    closingBalance        Float            @default(0)
-    createdAt             DateTime         @default(now())
-    updatedAt             DateTime         @updatedAt
 
-    tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-    building              Building?        @relation(fields: [buildingId], references: [id], onDelete: SetNull)
-    invoices              Invoice[]
-    payments              Payment[]
-    taskAssignees         TaskAssignee[]
-    gasConsumptions       GasConsumption[]
-    waterConsumptions     WaterConsumption[]
+enum UnitStatus {
+  VACANT      // Unit is not occupied
+  OCCUPIED    // Unit is occupied by a customer
+  MAINTENANCE
+  OCCUPIED_PENDING_PAYMENT
+}
 
-    @@index([tenantId])
-    @@index([buildingId])
-    @@index([phoneNumber])
-    @@index([email])
-    @@index([status])
-    Receipt Receipt[]
-  }
+
+
+model Customer {
+  id                    String           @id @default(uuid())
+  tenantId              Int
+  unitId                String?          // Links to unit (optional if not assigned)
+  firstName             String
+  lastName              String
+  email                 String?
+  phoneNumber           String           @unique
+  secondaryPhoneNumber  String?
+  nationalId            String?          @unique
+  status                CustomerStatus   @default(ACTIVE)
+  closingBalance        Float            @default(0)
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unit                  Unit?            @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  invoices              Invoice[]
+  payments              Payment[]
+  deposits              Deposit[]
+  taskAssignees         TaskAssignee[]
+  gasConsumptions       GasConsumption[]
+  waterConsumptions     WaterConsumption[]
+  receipts              Receipt[]
+
+  @@index([tenantId])
+  @@index([unitId])
+  @@index([phoneNumber])
+  @@index([email])
+  @@index([nationalId])
+  @@index([status])
+  Building Building[]
+}
+
+  model Deposit {
+  id              String          @id @default(uuid())
+  tenantId        Int             // Links to the tenant
+  customerId      String          // Links to the customer
+  invoiceId       String?         // Links to the invoice that billed the deposit
+  amount          Float           // Deposit amount
+  status          DepositStatus   @default(ACTIVE) // e.g., ACTIVE, REFUNDED, FORFEITED
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  refundedAt      DateTime?       // When the deposit was refunded
+  refundAmount    Float?          // Amount refunded (after deductions)
+  deductionReason String?         // Reason for deductions (e.g., damages)
+  refundTransactionId String?     @unique // Links to refund transaction (if any)
+
+  // Relationships
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  invoice         Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+}
+
+enum DepositStatus {
+  ACTIVE        // Deposit is held
+  REFUNDED      // Deposit fully or partially refunded
+  FORFEITED     // Deposit not refunded due to damages or other reasons
+}
 
 
 // GasConsumption model
@@ -361,31 +427,38 @@ model WaterConsumption {
 enum CustomerStatus {
   ACTIVE
   INACTIVE
+  PENDING
 }
 
 // Invoice model for customer billing
 
 // Invoice model
 model Invoice {
-  id                    String          @id @default(uuid())
-  tenantId              Int
-  customerId            String
-  invoicePeriod         DateTime
-  invoiceNumber         String          @unique
-  invoiceAmount         Float
-  isSystemGenerated     Boolean         @default(true)
-  createdBy             String          @default("System")
-  status                InvoiceStatus   @default(UNPAID)
-  createdAt             DateTime        @default(now())
-  updatedAt             DateTime        @updatedAt
-  amountPaid            Float           @default(0)
-  closingBalance        Float           @default(0)
-
-  tenant                Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer              Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  payments              Payment[]
-  InvoiceItem           InvoiceItem[]
-  ReceiptInvoice        ReceiptInvoice[] @relation("InvoiceReceipts")
+  id                 String          @id @default(uuid())
+  tenantId           Int
+  customerId         String
+  unitId             String?         // Now optional
+  invoicePeriod      DateTime
+  invoiceNumber      String          @unique
+  invoiceAmount      Float
+  amountPaid         Float           @default(0)
+  status             InvoiceStatus
+  closingBalance     Float           @default(0)
+  isSystemGenerated  Boolean
+  createdBy          String
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer           Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  unit               Unit?           @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  InvoiceItem        InvoiceItem[]
+  payments           Payment[]
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([unitId])
+  @@index([invoiceNumber])
+  Deposit Deposit[]
+  ReceiptInvoice ReceiptInvoice[] @relation("InvoiceReceipts")
 }
 
 // InvoiceItem model

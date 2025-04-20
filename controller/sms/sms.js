@@ -710,38 +710,121 @@ const harshBillReminder = async (req, res) => {
 
 // Send SMS to a group of customers
 const sendToGroup = async (req, res) => {
-  const { day, message } = req.body;
-  const { tenantId } = req.user; 
+  const { landlordID, buildingID, message } = req.body;
+  const tenantId = req.user?.tenantId;
 
-
-  if (!day || !message) {
-    return res.status(400).json({ error: 'Day and message are required.' });
+  // Input validation
+  if (!tenantId) {
+    return res.status(401).json({ error: 'Unauthorized: Tenant ID is required' });
   }
-  
+  if (!message || typeof message !== 'string' || message.trim() === '') {
+    return res.status(400).json({ error: 'Message is required and must be a non-empty string' });
+  }
+  if (!landlordID && !buildingID) {
+    return res.status(400).json({ error: 'Either landlordID or buildingID must be provided' });
+  }
+
   try {
-    const customers = await prisma.customer.findMany({
-      where: {status: 'ACTIVE', tenantId, garbageCollectionDay: day.toUpperCase() },
-      select: { phoneNumber: true, 
+    let customers = [];
 
-        firstName:true,
-        closingBalance:true,
-        monthlyCharge:true,
-},
+    // Case 1: buildingID is provided (prioritized if both are provided)
+    if (buildingID) {
+      // Validate building exists and belongs to tenant
+      const building = await prisma.building.findFirst({
+        where: { id: buildingID, tenantId },
+      });
+      if (!building) {
+        return res.status(404).json({ error: `Building with ID ${buildingID} not found` });
+      }
+
+      // Fetch customers in the specified building
+      customers = await prisma.customer.findMany({
+        where: {
+          tenantId,
+          unit: {
+            buildingId: buildingID,
+            status: { in: ['OCCUPIED', 'OCCUPIED_PENDING_PAYMENT'] }, // Only occupied units
+          },
+          phoneNumber: { not: '' }, // Exclude empty phone numbers
+        },
+        select: {
+          id: true,
+          phoneNumber: true,
+          firstName: true,
+          lastName: true,
+        },
+      });
+    }
+    // Case 2: Only landlordID is provided
+    else if (landlordID) {
+      // Validate landlord exists and belongs to tenant
+      const landlord = await prisma.landlord.findFirst({
+        where: { id: landlordID, tenantId },
+      });
+      if (!landlord) {
+        return res.status(404).json({ error: `Landlord with ID ${landlordID} not found` });
+      }
+
+      // Fetch customers in buildings managed by the landlord
+      customers = await prisma.customer.findMany({
+        where: {
+          tenantId,
+          unit: {
+            building: { landlordId: landlordID },
+            status: { in: ['OCCUPIED', 'OCCUPIED_PENDING_PAYMENT'] }, // Only occupied units
+          },
+          phoneNumber: { not: '' }, // Exclude empty phone numbers
+        },
+        select: {
+          id: true,
+          phoneNumber: true,
+          firstName: true,
+          lastName: true,
+        },
+      });
+    }
+
+    // Check if customers were found
+    if (customers.length === 0) {
+      return res.status(404).json({
+        error: `No customers with valid phone numbers found for the specified ${buildingID ? 'building' : 'landlord'}`,
+      });
+    }
+
+    // Prepare SMS messages with valid phone numbers
+    const messages = customers
+      .map((customer) => ({
+        mobile: sanitizePhoneNumber(customer.phoneNumber),
+        message,
+      }))
+      .filter((msg) => /^\+?\d{10,15}$/.test(msg.mobile)); // Ensure valid phone number format
+
+    if (messages.length === 0) {
+      return res.status(400).json({ error: 'No valid phone numbers found for the selected customers' });
+    }
+
+    // Send SMS
+    const smsResponses = await sendSms(tenantId, messages);
+
+    // Log the responses for debugging
+    console.log('SMS Responses:', smsResponses);
+
+    // Return success response
+    res.status(200).json({
+      message: `SMS sent to ${messages.length} customers`,
+      smsResponses,
     });
-
-    const messages = customers.map((customer) => ({
-      mobile: sanitizePhoneNumber(customer.phoneNumber),
-      message,
-    }));
-
-    const smsResponses = await sendSms(tenantId,messages);
-
-    res.status(200).json({ message: 'SMS sent to the group successfully.', smsResponses });
   } catch (error) {
     console.error('Error sending SMS to group:', error);
-    res.status(500).json({ error: 'Failed to send SMS to group.' });
+    res.status(500).json({ error: 'Failed to send SMS' });
+  } finally {
+    await prisma.$disconnect();
   }
 };
+
+
+
+
 
 // Helper function to send SMS
 

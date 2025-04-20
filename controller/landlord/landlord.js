@@ -226,7 +226,56 @@ const getBuildingsByLandlord = async (req, res) => {
   }
 };
 
-module.exports = { getBuildingsByLandlord , createLandlord , searchLandlords };
+
+
+const getAllLandlords = async (req, res) => {
+  const { tenantId } = req.user;
+  const { name } = req.query;
+
+  if (!tenantId) {
+    return res.status(400).json({ message: 'Tenant ID is required' });
+  }
+
+  try {
+    const where = { tenantId };
+    if (name) {
+      where.OR = [
+        { firstName: { contains: name, mode: 'insensitive' } },
+        { lastName: { contains: name, mode: 'insensitive' } },
+      ];
+    }
+
+    const landlords = await prisma.landlord.findMany({
+      where,
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phoneNumber: true,
+        status: true,
+      },
+      orderBy: { firstName: 'asc' },
+    });
+
+    // Format response with full name
+    const formattedLandlords = landlords.map((landlord) => ({
+      ...landlord,
+      name: `${landlord.firstName} ${landlord.lastName}`.trim(),
+    }));
+
+    res.status(200).json({ landlords: formattedLandlords });
+  } catch (error) {
+    console.error('Error fetching landlords:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
+  }
+};
+
+
+
+module.exports = { getBuildingsByLandlord , createLandlord , searchLandlords ,getAllLandlords};
 
 
 

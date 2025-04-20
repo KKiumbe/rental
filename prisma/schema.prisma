@@ -86,6 +86,12 @@ model Tenant {
   Unit Unit[]
 
   UserActivity UserActivity[]
+
+  WaterConsumption WaterConsumption[]
+
+  GasConsumption GasConsumption[]
+
+  LeaseTermination LeaseTermination[]
 }
 
 
@@ -276,25 +282,22 @@ model Landlord {
 
 // Building model
 model Building {
-  id                String           @id @default(uuid())
-  tenantId          Int
-  landlordId        String
-  name              String           // e.g., "Sunset Apartments"
-  address           String?          // e.g., "123 Main St"
-  unitCount         Int?             // Optional: total units in building
-  gasRate           Float?           // e.g., 50 KES per cubic meter
-  waterRate         Float?           // e.g., 1.2 KES per liter
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-
-  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  landlord          Landlord         @relation(fields: [landlordId], references: [id], onDelete: Cascade)
-  customers         Customer[]       // Tenants in this building
-
+  id          String    @id @default(uuid())
+  tenantId    Int
+  landlordId  String
+  name        String
+  address     String?
+  unitCount   Int?
+  gasRate     Float?
+  waterRate   Float?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  landlord    Landlord  @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  units       Unit[]
   @@index([tenantId])
   @@index([landlordId])
-  @@index([name])
-  Unit Unit[]
+  Customer Customer[]
 }
 
 // Enum for landlord status
@@ -349,7 +352,9 @@ model Customer {
   closingBalance        Float            @default(0)
   createdAt             DateTime         @default(now())
   updatedAt             DateTime         @updatedAt
-
+   leaseFileUrl        String?
+  leaseStartDate       DateTime?
+  leaseEndDate         DateTime?
   tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   unit                  Unit?            @relation(fields: [unitId], references: [id], onDelete: SetNull)
   invoices              Invoice[]
@@ -367,6 +372,7 @@ model Customer {
   @@index([nationalId])
   @@index([status])
   Building Building[]
+  LeaseTermination LeaseTermination[]
 }
 
   model Deposit {
@@ -401,9 +407,11 @@ model GasConsumption {
   id            String    @id @default(uuid())
   customerId    String
   period        DateTime  // e.g., "2025-02-01"
+   reading       Float     // Current meter reading 
   consumption   Float     // e.g., 10 cubic meters
 
-
+tenantId     Int
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -416,11 +424,14 @@ model GasConsumption {
 model WaterConsumption {
   id            String    @id @default(uuid())
   customerId    String
+  tenantId     Int
   period        DateTime  // e.g., "2025-02-01"
-  consumption   Float     // e.g., 1000 liters
+  reading       Float     // Current meter reading in liters
+  consumption   Float     // Calculated: current reading - previous reading
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   @@index([customerId, period])
 }
 // Enum for customer status
@@ -459,6 +470,7 @@ model Invoice {
   @@index([invoiceNumber])
   Deposit Deposit[]
   ReceiptInvoice ReceiptInvoice[] @relation("InvoiceReceipts")
+  LeaseTermination LeaseTermination[] @relation("TerminationInvoices")
 }
 
 // InvoiceItem model
@@ -676,5 +688,21 @@ enum TaskStatus {
 }
 
 
-
+model LeaseTermination {
+  id              String        @id @default(uuid())
+  customerId      String
+  tenantId        Int
+  stage           String        // e.g., "DETAILS", "MEDIA", "DAMAGES", "INVOICES", "VACATED"
+  terminationDate DateTime?
+  reason          String?
+  notes           String?
+  media           Json[]        // Array of { url: string, type: "photo" | "video" }
+  damages         Json[]        // Array of { description: string, notes: string, media: Json[] }
+  invoices        Invoice[]     @relation("TerminationInvoices")
+  vacatedAt       DateTime?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  customer        Customer      @relation(fields: [customerId], references: [id])
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+}
 

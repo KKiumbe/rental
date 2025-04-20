@@ -35,6 +35,8 @@ const landlordRoute = require('./routes/landlord/landlordRoute.js')
 
 const utilitiesReadings = require('./routes/utilitiesReadingsRoute/utilitiesReadingRoute.js')
 
+const leaseRoute = require('./routes/leaseRoute/leaseRoute.js') //done
+
 const taskRoute = require('./routes/tasks/tasks.js')
 const cookieParser = require('cookie-parser');
 
@@ -129,6 +131,8 @@ app.use('/api', buildingRoute); //done
 app.use('/api', landlordRoute); //done
 
 app.use('/api', utilitiesReadings); //done
+//lease termination routes
+app.use('/api', leaseRoute); //done
 
 
 

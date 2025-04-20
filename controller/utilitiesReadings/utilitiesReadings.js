@@ -2,29 +2,28 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 
-
 const createWaterReading = async (req, res) => {
-  const { customerId, consumption } = req.body;
+  const { customerId, reading } = req.body;
   const { tenantId } = req.user;
 
-  // Set period to first of current month (align with invoiceCreate)
+  // Set period to first of current month
   const period = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
 
   // Validate required fields
-  if (!customerId || consumption === undefined) {
-    return res.status(400).json({ message: 'Required fields: customerId, consumption' });
+  if (!customerId || reading === undefined) {
+    return res.status(400).json({ message: 'Required fields: customerId, reading' });
   }
 
-  // Validate consumption
-  if (isNaN(consumption) || consumption < 0) {
-    return res.status(400).json({ message: 'Consumption must be a non-negative number.' });
+  // Validate reading
+  if (isNaN(reading) || reading < 0) {
+    return res.status(400).json({ message: 'Reading must be a non-negative number.' });
   }
 
   try {
     // Check if customer exists and belongs to tenant
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
-      include: { building: true },
+      include: { Building: true ,unit: true,},
     });
 
     if (!customer || customer.tenantId !== tenantId) {
@@ -32,29 +31,33 @@ const createWaterReading = async (req, res) => {
     }
 
     // Check if customer is assigned to a building
-    if (!customer.buildingId || !customer.building) {
+    if (!customer.unit || !customer.Building) {
       return res.status(400).json({ message: 'Customer is not assigned to a building.' });
     }
 
-    // Check if reading exists for this period
-    const existingReading = await prisma.waterConsumption.findFirst({
-      where: { customerId, period },
+
+    // Fetch the most recent previous reading for the customer
+    const previousReading = await prisma.waterConsumption.findFirst({
+      where: { customerId},
+      orderBy: { period: 'desc' },
+      select: { reading: true },
     });
 
-    if (existingReading) {
-      return res.status(400).json({ message: 'Water reading already exists for this customer and period.' });
-    }
+    // Calculate consumption (current reading - previous reading, or 0 if no previous reading)
+    const consumption = previousReading ? parseFloat(reading) - previousReading.reading : 0;
 
     // Create water consumption record
-    const reading = await prisma.waterConsumption.create({
+    const waterReading = await prisma.waterConsumption.create({
       data: {
         customerId,
         period,
-        consumption: parseFloat(consumption),
+        reading: parseFloat(reading),
+        consumption,
+        tenantId,
       },
     });
 
-    res.status(201).json({ message: 'Water reading created successfully', reading });
+    res.status(201).json({ message: 'Water reading created successfully', reading: waterReading });
   } catch (error) {
     console.error('Error creating water reading:', error);
     if (error instanceof prisma.PrismaClientValidationError) {
@@ -64,28 +67,28 @@ const createWaterReading = async (req, res) => {
   }
 };
 
-
-
-
 const createGasReading = async (req, res) => {
-  const { customerId, consumption } = req.body;
+  const { customerId, reading } = req.body;
   const { tenantId } = req.user;
 
+  // Set period to first of current month (consistent with createWaterReading)
+  const period = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
   // Validate required fields
-  if (!customerId ) {
-    return res.status(400).json({ message: 'Required fields: customerId.' });
+  if (!customerId || reading === undefined) {
+    return res.status(400).json({ message: 'Required fields: customerId, reading' });
   }
 
-  // Validate consumption
-  if (isNaN(consumption) || consumption < 0) {
-    return res.status(400).json({ message: 'Consumption must be a non-negative number.' });
+  // Validate reading
+  if (isNaN(reading) || reading < 0) {
+    return res.status(400).json({ message: 'Reading must be a non-negative number.' });
   }
 
   try {
     // Check if customer exists and belongs to tenant
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
-      include: { building: true },
+      include: { Building: true ,unit: true,},
     });
 
     if (!customer || customer.tenantId !== tenantId) {
@@ -93,35 +96,48 @@ const createGasReading = async (req, res) => {
     }
 
     // Check if customer is assigned to a building
-    if (!customer.buildingId || !customer.building) {
+    if (!customer.Building || !customer.unit) {
       return res.status(400).json({ message: 'Customer is not assigned to a building.' });
     }
 
     // Check if gasRate is defined
-    if (customer.building.gasRate === null) {
+    if (customer.Building.gasRate === null) {
       return res.status(400).json({ message: 'Gas rate is not defined for this building.' });
     }
 
-
-
   
 
+    // Fetch the most recent previous reading for the customer
+    const previousReading = await prisma.gasConsumption.findFirst({
+      where: { customerId},
+      orderBy: { period: 'desc' },
+      select: { reading: true },
+    });
+
+    // Calculate consumption (current reading - previous reading, or 0 if no previous reading)
+    const consumption = previousReading ? parseFloat(reading) - previousReading.reading : 0;
+
     // Create gas consumption record
-    const reading = await prisma.gasConsumption.create({
+    const gasReading = await prisma.gasConsumption.create({
       data: {
         customerId,
-        period: new Date(period),
-        consumption: parseFloat(consumption),
-       
-       
+        period,
+        reading: parseFloat(reading),
+        consumption,
+        tenantId,
       },
     });
 
-    res.status(201).json({ message: 'Gas reading created successfully', reading });
+    res.status(201).json({ message: 'Gas reading created successfully', reading: gasReading });
   } catch (error) {
     console.error('Error creating gas reading:', error);
+    if (error instanceof prisma.PrismaClientValidationError) {
+      return res.status(400).json({ message: 'Invalid data provided for gas reading.' });
+    }
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+
 
 module.exports = { createGasReading, createWaterReading };

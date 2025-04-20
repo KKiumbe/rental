@@ -198,11 +198,12 @@ const signin = async (req, res) => {
     // Log the login action
     await prisma.userActivity.create({
       data: {
-        userId: user.id,
-        action: "LOGIN",
+        user: { connect: { id: user.id } },
+        tenant: { connect: { id: user.tenantId } },
+        action: `User ${user.firstName} ${user.lastName} logged in`,
+        timestamp: new Date(),
       },
     });
-
 
 
 

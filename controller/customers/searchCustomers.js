@@ -20,73 +20,118 @@ const sanitizePhoneNumber = (phone) => {
 };
 
 
+
+
 const SearchCustomers = async (req, res) => {
-    const { phone, name } = req.query;
-    const tenantId = req.user?.tenantId; // Extract tenantId from authenticated user
-    console.log("Tenant ID:", tenantId);
-    console.log("Raw phone number:", phone);
+  const { phone, name, page = 1, limit = 10 } = req.query;
+  const tenantId = req.user?.tenantId;
 
-    if (!tenantId) {
-        return res.status(400).json({ message: 'Tenant ID is required' });
-    }
+  console.log('Tenant ID:', tenantId);
+  console.log('Raw phone number:', phone);
+  console.log('Name query:', name);
+  console.log('Page:', page, 'Limit:', limit);
 
-    try {
-        // If phone is provided, sanitize and search for an exact match
-        if (phone) {
-            const sanitizedPhone = sanitizePhoneNumber(phone);
-            console.log("Sanitized phone number:", sanitizedPhone);
+  if (!tenantId) {
+    return res.status(400).json({ message: 'Tenant ID is required' });
+  }
 
-            const uniqueCustomer = await prisma.customer.findMany({
-                where: {
-                    phoneNumber: sanitizedPhone, // Exact match for phone
-                    tenantId, // Filter by tenantId
-                },
-            });
+  try {
+    // Parse pagination params
+    const pageNum = parseInt(page) || 1;
+    const limitNum = parseInt(limit) || 10;
+    const skip = (pageNum - 1) * limitNum;
 
-            // Return the customer if found, otherwise return null
-            return res.json(uniqueCustomer.length ? uniqueCustomer : { message: 'No customers found' });
-        }
-
-        // If name is provided, search by first or last name
-        let query = {
-            where: {
-                tenantId, // Filter by tenantId
+    // Base query
+    let query = {
+      where: {
+        tenantId,
+      },
+      skip,
+      take: limitNum,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phoneNumber: true,
+        secondaryPhoneNumber: true,
+        nationalId: true,
+        status: true,
+        closingBalance: true,
+       
+        unitId: true,
+        createdAt: true,
+        updatedAt: true,
+        unit: {
+          select: {
+            unitNumber: true,
+            status: true,
+            monthlyCharge: true,
+            depositAmount: true,
+            building: {
+              select: {
+                name: true,
+              },
             },
-        };
+          },
+        },
+      },
+    };
 
-        if (name) {
-            query.where.OR = [
-                {
-                    firstName: {
-                        contains: name, // Pattern matching for first name
-                        mode: 'insensitive', // Case insensitive
-                    },
-                },
-                {
-                    lastName: {
-                        contains: name, // Pattern matching for last name
-                        mode: 'insensitive', // Case insensitive
-                    },
-                },
-            ];
-        }
-
-        // Fetch customers based on the query
-        const customers = await prisma.customer.findMany(query);
-
-        // Return response
-        if (customers.length > 0) {
-            res.json(customers);
-        } else {
-            res.status(404).json({ message: "No customer found " });
-        }
-
-
-    } catch (error) {
-        console.error('Error fetching customers:', error);
-        res.status(500).json({ message: 'Error fetching customers' });
+    // Handle phone search (exact match)
+    if (phone) {
+      const sanitizedPhone = sanitizePhoneNumber(phone);
+      console.log('Sanitized phone number:', sanitizedPhone);
+      query.where.phoneNumber = sanitizedPhone;
     }
+    // Handle name search (partial match)
+    else if (name) {
+      query.where.OR = [
+        {
+          firstName: {
+            contains: name.trim(),
+            mode: 'insensitive',
+          },
+        },
+        {
+          lastName: {
+            contains: name.trim(),
+            mode: 'insensitive',
+          },
+        },
+      ];
+    }
+
+    // Fetch customers
+    const customers = await prisma.customer.findMany(query);
+
+    // Fetch total count for pagination
+    const totalCustomers = await prisma.customer.count({
+      where: query.where,
+    });
+
+    // Format response to match getAllCustomers
+    const formattedCustomers = customers.map((customer) => ({
+      ...customer,
+      buildingName: customer.unit?.building?.name || null,
+    }));
+
+    res.status(200).json({
+      customers: formattedCustomers,
+      total: totalCustomers,
+      currentPage: pageNum,
+      totalPages: Math.ceil(totalCustomers / limitNum),
+    });
+  } catch (error) {
+    console.error('Error searching customers:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
+  }
 };
+
+
 
 
 const SearchCustomersByName = async (req, res) => {

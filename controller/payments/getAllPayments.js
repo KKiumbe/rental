@@ -113,41 +113,110 @@ const sanitizePhoneNumber = (phone) => {
   return sanitized;
 };
 
-// Fetch all payments
 const getAllPayments = async (req, res) => {
   const tenantId = req.user?.tenantId;
   const page = parseInt(req.query.page) || 1;
   const limit = parseInt(req.query.limit) || 10;
+  const modeOfPayment = req.query.modeOfPayment?.toUpperCase(); // e.g., MPESA
+  const search = req.query.search?.trim(); // Search by transactionId or firstName
   const skip = (page - 1) * limit;
 
+  // Validate tenantId
   if (!tenantId) {
     return res.status(401).json({ error: 'Unauthorized: Tenant ID not found' });
   }
 
+  // Validate pagination
+  if (page < 1 || limit < 1) {
+    return res.status(400).json({ error: 'Invalid page or limit value' });
+  }
+
+  // Validate modeOfPayment if provided
+  const validModes = ['CASH', 'MPESA', 'BANK_TRANSFER', 'CREDIT_CARD', 'DEBIT_CARD'];
+  if (modeOfPayment && !validModes.includes(modeOfPayment)) {
+    return res.status(400).json({ error: `Invalid modeOfPayment. Must be one of: ${validModes.join(', ')}` });
+  }
+
   try {
+    // Build where clause
+    const where = {
+      tenantId,
+      ...(modeOfPayment && { modeOfPayment }),
+      ...(search && {
+        OR: [
+          { transactionId: { contains: search, mode: 'insensitive' } },
+          { firstName: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    // Fetch payments and total count concurrently
     const [payments, total] = await Promise.all([
       prisma.payment.findMany({
-        where: { tenantId },
-        orderBy: { createdAt: 'desc' }, 
+        where,
+        orderBy: { createdAt: 'desc' },
         skip,
         take: limit,
-        include: {
+        select: {
+          id: true,
+          amount: true,
+          modeOfPayment: true,
+          firstName: true,
+          receipted: true,
+          transactionId: true,
+          ref: true,
+          receiptId: true,
+          createdAt: true,
           receipt: {
-            include: {
-              receiptInvoices: { include: { invoice: true } },
+            select: {
+              id: true,
+              receiptInvoices: {
+                select: {
+                  id: true,
+                  invoice: {
+                    select: {
+                      id: true,
+                      invoiceNumber: true,
+                      invoiceAmount: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+          Invoice: {
+            select: {
+              id: true,
+              invoiceNumber: true,
+              invoiceAmount : true,
+            },
+          },
+          Customer: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
             },
           },
         },
       }),
-      prisma.payment.count({ where: { tenantId } }),
+      prisma.payment.count({ where }),
     ]);
 
-    res.json({ payments, total });
+    // Format response
+    res.json({
+      payments,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Something went wrong' });
+    console.error('Error fetching payments:', error);
+    res.status(500).json({ error: 'Failed to fetch payments' });
   }
 };
+
 
 // Search payments by phone number
 const searchPaymentsByPhone = async (req, res) => {

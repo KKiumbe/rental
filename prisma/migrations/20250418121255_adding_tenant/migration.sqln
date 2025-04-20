@@ -1,0 +1,4 @@
+ALTER TABLE "WaterConsumption" ADD COLUMN "tenantId" INTEGER;
+
+ALTER TABLE "GasConsumption" ADD COLUMN "tenantId" INTEGER;
+

@@ -23,14 +23,7 @@ const createCustomer = async (req, res) => {
     });
   }
 
-  // Validate status
-  const validStatuses = Object.values(CustomerStatus);
-  if (status && !validStatuses.includes(status)) {
-    return res.status(400).json({
-      success: false,
-      message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
-    });
-  }
+
 
   try {
     // Check if tenant exists
@@ -236,12 +229,12 @@ const activateCustomer = async (req, res) => {
         message: 'Customer is not assigned to a unit.',
       });
     }
-    if (customer.unit.status !== UnitStatus.OCCUPIED_PENDING_PAYMENT) {
-      return res.status(400).json({
-        success: false,
-        message: 'Unit is not in OCCUPIED_PENDING_PAYMENT status.',
-      });
-    }
+    // if (customer.unit.status !== UnitStatus.OCCUPIED_PENDING_PAYMENT) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: 'Unit is not in OCCUPIED_PENDING_PAYMENT status.',
+    //   });
+    // }
 
  
 
@@ -297,7 +290,56 @@ const activateCustomer = async (req, res) => {
     await prisma.$disconnect();
   }
 };
+async function getCustomerDeposits(req, res) {
+  const { id:customerId } = req.params;
+  const tenantId = req.user?.tenantId;
+
+  if (!tenantId) {
+    return res.status(403).json({ error: "Tenant ID is required to fetch deposits" });
+  }
+
+  if (!customerId) {
+    return res.status(400).json({ error: "Customer ID is required" });
+  }
+
+  try {
+    // Fetch deposits for the customer
+    const deposits = await prisma.deposit.findMany({
+      where: {
+        customerId,
+        tenantId,
+      },
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        refundedAt: true,
+        refundAmount: true,
+        deductionReason: true,
+        refundTransactionId: true,
+        invoice: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            status: true,
+            invoiceAmount: true,
+            amountPaid: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+
+    res.json({ deposits });
+  } catch (error) {
+    console.error("Error fetching deposits:", error);
+    res.status(500).json({ error: "Internal server error while fetching deposits" });
+  }
+}
 
 
-
-module.exports = { createCustomer, activateCustomer };
+module.exports = { createCustomer, activateCustomer,getCustomerDeposits };

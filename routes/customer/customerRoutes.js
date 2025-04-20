@@ -1,6 +1,6 @@
 // routes/customerRoutes.js
 const express = require('express');
-const { createCustomer } = require('../../controller/customers/createCustomer.js');
+const { createCustomer, activateCustomer, getCustomerDeposits } = require('../../controller/customers/createCustomer.js');
 const { getAllCustomers } = require('../../controller/customers/getAllCustomers.js');
 const { editCustomer } = require('../../controller/customers/editCustomer.js');
 const { SearchCustomers, SearchCustomersByPhoneNumber, SearchCustomersByName } = require('../../controller/customers/searchCustomers.js');
@@ -19,6 +19,14 @@ router.post(
  
     createCustomer // Step 3: Proceed to the controller if authorized
 );
+
+router.post(
+    '/active-customer',verifyToken, checkAccess('customer','create'),
+ 
+    activateCustomer // Step 3: Proceed to the controller if authorized
+);
+
+router.get("/customers/:id/deposits",verifyToken, getCustomerDeposits);
 router.get('/customers', verifyToken, checkAccess('customer','read') ,getAllCustomers);
 router.put('/customers/:id',verifyToken,checkAccess('customer','update'), editCustomer);
 router.get('/search-customers',verifyToken, SearchCustomers);

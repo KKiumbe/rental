@@ -704,6 +704,10 @@ const generateInvoicesForDay = async (day) => {
 
 
 
+
+
+
+
 const createInitialInvoice = async (req, res) => {
   const { tenantId, user } = req.user;
   const { customerId, invoiceItems: inputInvoiceItems = [] } = req.body;
@@ -713,6 +717,12 @@ const createInitialInvoice = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: 'Required field: customerId',
+    });
+  }
+  if (inputInvoiceItems.length === 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'At least one invoice item is required',
     });
   }
 
@@ -740,6 +750,9 @@ const createInitialInvoice = async (req, res) => {
       });
     }
 
+
+
+
     // Validate customer
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
@@ -751,7 +764,10 @@ const createInitialInvoice = async (req, res) => {
         message: 'Customer not found or does not belong to tenant.',
       });
     }
-    if (customer.status !== CustomerStatus.PENDING) {
+
+    // Optional: Status validation (uncomment if needed)
+    /*
+    if (customer.status !== 'PENDING') {
       return res.status(400).json({
         success: false,
         message: 'Customer must be in PENDING status.',
@@ -763,113 +779,125 @@ const createInitialInvoice = async (req, res) => {
         message: 'Customer is not assigned to a unit.',
       });
     }
-    if (customer.unit.status !== UnitStatus.OCCUPIED_PENDING_PAYMENT) {
+    if (customer.unit.status !== 'OCCUPIED_PENDING_PAYMENT') {
       return res.status(400).json({
         success: false,
         message: 'Unit is not in OCCUPIED_PENDING_PAYMENT status.',
       });
     }
+    */
 
-    // Prepare invoice items
+    // Validate and prepare invoice items
     const invoiceItems = [];
-
-    // Always include default unit-derived items
-    if (customer.unit.depositAmount > 0) {
-      invoiceItems.push({
-        description: 'Security Deposit',
-        amount: parseFloat(customer.unit.depositAmount.toFixed(2)),
-        quantity: 1,
-      });
-    }
-    if (customer.unit.monthlyCharge > 0) {
-      invoiceItems.push({
-        description: 'First Month Rent',
-        amount: parseFloat(customer.unit.monthlyCharge.toFixed(2)),
-        quantity: 1,
-      });
-    }
-
-    // Add user-provided invoice items
-    if (inputInvoiceItems.length > 0) {
-      // Validate custom invoice items
-      for (const item of inputInvoiceItems) {
-        if (
-          !item.description ||
-          !Number.isFinite(item.amount) ||
-          item.amount <= 0 ||
-          !Number.isInteger(item.quantity) ||
-          item.quantity <= 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: 'Each invoice item must have a description, positive amount, and positive integer quantity.',
-          });
-        }
-        invoiceItems.push({
-          description: item.description,
-          amount: parseFloat(item.amount.toFixed(2)),
-          quantity: item.quantity,
+    for (const item of inputInvoiceItems) {
+      if (
+        !item.description ||
+        !Number.isFinite(item.amount) ||
+        item.amount <= 0 ||
+        !Number.isInteger(item.quantity) ||
+        item.quantity <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: 'Each invoice item must have a description, positive amount, and positive integer quantity.',
         });
       }
-    }
-
-    // Ensure there are billable items
-    if (invoiceItems.length === 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'No billable items found for the invoice.',
+      invoiceItems.push({
+        description: item.description,
+        amount: parseFloat(item.amount.toFixed(2)),
+        quantity: item.quantity,
       });
     }
 
-    // Call invoiceCreate
-    const invoiceRequest = {
-      body: {
-        customerId: customer.id,
-        isSystemGenerated: inputInvoiceItems.length === 0, // System-generated if no custom items
-        invoiceItems,
-      },
-      user: { tenantId, user },
-    };
+    // Calculate total invoice amount
+    const invoiceAmount = invoiceItems.reduce(
+      (sum, item) => sum + item.amount * item.quantity,
+      0
+    );
 
-    const invoiceResponse = await new Promise((resolve) => {
-      const res = {
-        status: (code) => ({
-          json: (data) => resolve({ code, data }),
-        }),
-      };
-      invoiceCreate(invoiceRequest, res);
-    });
+    // Generate unique invoice number
+    const invoiceNumber = generateInvoiceNumber(customerId);
 
-    if (invoiceResponse.code !== 201) {
-      return res.status(invoiceResponse.code).json(invoiceResponse.data);
-    }
 
-    // Log user activity
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: user } },
-        tenant: { connect: { id: tenantId } },
-        action: `Created initial invoice ${invoiceResponse.data.data.invoiceNumber} for customer ${customerId} by ${currentUser.firstName} ${currentUser.lastName}`,
-        timestamp: new Date(),
-      },
-    });
+
+
+    // Start a Prisma transaction
+    const result = await prisma.$transaction(async (tx) => {
+      // Create invoice
+      const invoice = await tx.invoice.create({
+        data: {
+          tenantId,
+          customerId,
+          unitId: customer.unitId,
+          invoicePeriod: new Date(),
+          invoiceNumber,
+          invoiceAmount,
+          amountPaid: 0,
+          status: 'UNPAID',
+          closingBalance: invoiceAmount,
+          isSystemGenerated: false,
+          createdBy: currentUser.firstName + ' ' + currentUser.lastName,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          InvoiceItem: {
+            create: invoiceItems.map((item) => ({
+              description: item.description,
+              amount: item.amount,
+              quantity: item.quantity,
+            })),
+          },
+        },
+      });
+
+   
+      const deposits = await Promise.all(
+        invoiceItems.map((item) =>
+          tx.deposit.create({
+            data: {
+              tenantId,
+              customerId,
+              invoiceId: invoice.id,
+              amount: item.amount * item.quantity,
+              status: 'ACTIVE',
+              createdAt: new Date(),
+              updatedAt: new Date(),
+            },
+          })
+        )
+      );
+
+      // Log user activity
+      const activity = await tx.userActivity.create({
+        data: {
+          userId: user,
+          tenantId,
+          action: `Created initial invoice ${invoice.invoiceNumber} for customer ${customerId} by ${currentUser.firstName} ${currentUser.lastName}`,
+          timestamp: new Date(),
+        },
+      });
+
+      return { invoice, deposits, activity };
+    }, { timeout: 10000 }); // Increased timeout to 10 seconds
 
     return res.status(201).json({
       success: true,
       message: 'Initial invoice created successfully',
-      data: invoiceResponse.data.data,
+      data: {
+        invoice: result.invoice,
+        deposits: result.deposits,
+      },
     });
   } catch (error) {
     console.error('Error creating initial invoice:', error);
     return res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   } finally {
     await prisma.$disconnect();
   }
 };
-
 
 
 
@@ -1316,7 +1344,8 @@ async function cancelSystemGeneratedInvoices() {
   return transaction;
 }
 
-// Get all invoices, ordered by the latest first
+
+
 async function getAllInvoices(req, res) {
   const tenantId = req.user?.tenantId;
 
@@ -1344,11 +1373,14 @@ async function getAllInvoices(req, res) {
         id: true,
         invoiceNumber: true,
         invoiceAmount: true,
+        amountPaid: true, // Added from updated schema
         closingBalance: true,
         invoicePeriod: true,
         status: true,
         isSystemGenerated: true,
+        createdBy: true, // Added from updated schema
         createdAt: true,
+        updatedAt: true, // Added for completeness
         customer: {
           select: {
             id: true,
@@ -1357,9 +1389,34 @@ async function getAllInvoices(req, res) {
             phoneNumber: true,
           },
         },
-        items: {
+        unit: {
           select: {
+            id: true,
+            unitNumber: true, // Optional, included if unit exists
+          },
+        },
+        InvoiceItem : {
+          select: {
+            id: true, // Added for unique identification
             description: true,
+            quantity: true, // Added for more detail
+            amount: true, // Added for more detail
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            amount: true,
+            modeOfPayment: true,
+            createdAt: true,
+          },
+        },
+      
+        ReceiptInvoice: {
+          select: {
+            receiptId: true,
+            invoiceId: true,
+            
           },
         },
       },
@@ -1369,6 +1426,8 @@ async function getAllInvoices(req, res) {
     });
 
     // Format response to match frontend expectation
+
+    console.log(`Fetched ${invoices.length} invoices for tenant ${tenantId}.`);
     res.json({
       invoices,
       total,
@@ -1460,36 +1519,135 @@ async function cancelInvoiceById(req, res) {
 
 
 
-// Get invoice details by ID
 async function getInvoiceDetails(req, res) {
-  const { id } = req.params; // Extract the invoice ID from the route parameters
-  const tenantId = req.user?.tenantId; // Extract tenantId from authenticated user
+  const { id } = req.params;
+  const { tenantId, user } = req.user;
 
+  // Validate tenantId
   if (!tenantId) {
-    return res.status(403).json({ message: 'Tenant ID is required' });
+    return res.status(403).json({
+      success: false,
+      message: "Tenant ID is required",
+    });
   }
 
   try {
-    // Fetch the invoice and verify tenant ownership
+    // Fetch the invoice with related data
     const invoice = await prisma.invoice.findUnique({
       where: { id },
-      include: { items: true, customer: true },
+      include: {
+        InvoiceItem: {
+          select: {
+            id: true,
+            description: true,
+            amount: true,
+            quantity: true,
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            phoneNumber: true,
+            closingBalance: true,
+            email: true,
+            unit: {
+              select: {
+                id: true,
+                unitNumber: true,
+                building: {
+                  select: {
+                    id: true,
+                    name: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+        payments: {
+          select: {
+            id: true,
+            amount: true,
+            createdAt: true,
+            modeOfPayment: true,
+            transactionId: true,
+          },
+          orderBy: { createdAt: "desc" },
+        },
+      },
     });
 
     // Check if the invoice exists
     if (!invoice) {
-      return res.status(404).json({ message: 'Invoice not found' });
+      return res.status(404).json({
+        success: false,
+        message: "Invoice not found",
+      });
     }
 
-    // Verify that the invoice belongs to the authenticated tenant
+    // Verify tenant ownership
     if (invoice.tenantId !== tenantId) {
-      return res.status(403).json({ message: 'Access denied: You do not own this invoice' });
+      return res.status(403).json({
+        success: false,
+        message: "Access denied: You do not own this invoice",
+      });
     }
 
-    res.json(invoice);
+    // Compute additional fields
+    const totalItems = invoice.InvoiceItem.length; // Fixed: Changed from invoice.items
+    const outstandingBalance = invoice.invoiceAmount - invoice.amountPaid;
+    const formattedInvoice = {
+      ...invoice,
+      invoicePeriod: invoice.invoicePeriod ? new Date(invoice.invoicePeriod).toISOString() : null,
+      createdAt: invoice.createdAt ? new Date(invoice.createdAt).toISOString() : null,
+      totalItems,
+      outstandingBalance,
+      customer: {
+        ...invoice.customer,
+        unitName: invoice.customer?.unit?.unitNumber || "Not Assigned",
+        buildingName: invoice.customer?.unit?.building?.name || "N/A",
+      },
+    };
+
+    // Log user activity asynchronously to avoid blocking
+    prisma.userActivity
+      .create({
+        data: {
+          user: { connect: { id: user } },
+          tenant: { connect: { id: tenantId } },
+          action: `Viewed invoice ${invoice.invoiceNumber} details`,
+          timestamp: new Date(),
+        },
+      })
+      .catch((err) => console.error("Error logging user activity:", err)); // Non-blocking
+
+    return res.status(200).json({
+      success: true,
+      data: formattedInvoice,
+    });
   } catch (error) {
-    console.error('Error fetching invoice details:', error);
-    res.status(500).json({ message: 'Error fetching invoice details' });
+    console.error("Error fetching invoice details:", error);
+    if (error.name === "PrismaClientValidationError") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid invoice ID format",
+      });
+    }
+    if (error.code === "P2023") {
+      // Prisma timeout or database error
+      return res.status(500).json({
+        success: false,
+        message: "Database operation timed out",
+      });
+    }
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  } finally {
+    await prisma.$disconnect();
   }
 }
 

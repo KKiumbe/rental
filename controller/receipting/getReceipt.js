@@ -2,74 +2,133 @@ const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // Controller function to fetch all receipts
+
+
 const getReceipts = async (req, res) => {
-    const { tenantId } = req.user; // Extract tenantId from authenticated user
-    const page = parseInt(req.query.page) || 1; // Default to page 1
-    const limit = parseInt(req.query.limit) || 10; // Default to 10 items per page
-    const skip = (page - 1) * limit; // Calculate the number of records to skip
-  
-    // Validate tenantId
-    if (!tenantId) {
-      return res.status(403).json({ message: 'Tenant ID is required to fetch receipts.' });
-    }
-  
-    try {
-      // Fetch paginated receipts with their associated payment, customer, and invoice details
-      const [receipts, total] = await Promise.all([
-        prisma.receipt.findMany({
-          where: { tenantId },
-          skip, // Offset for pagination
-          take: limit,
-          orderBy: { createdAt: 'desc' }, 
-          include: {
-            payment: true, // Include payment details
-            customer: {
-              select: {
-                firstName: true,
-                lastName: true,
-                phoneNumber: true,
-                closingBalance: true,
-              },
+  const { tenantId } = req.user;
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 10;
+  const modeOfPayment = req.query.modeOfPayment?.toUpperCase(); // e.g., MPESA
+  const search = req.query.search?.trim(); // Search by paidBy, phoneNumber, transactionCode, or receiptNumber
+  const skip = (page - 1) * limit;
+
+  // Validate tenantId
+  if (!tenantId) {
+    return res.status(403).json({ error: 'Unauthorized: Tenant ID is required' });
+  }
+
+  // Validate pagination
+  if (page < 1 || limit < 1) {
+    return res.status(400).json({ error: 'Invalid page or limit value' });
+  }
+
+  // Validate modeOfPayment if provided
+  const validModes = ['CASH', 'MPESA', 'BANK_TRANSFER', 'CREDIT_CARD', 'DEBIT_CARD'];
+  if (modeOfPayment && !validModes.includes(modeOfPayment)) {
+    return res.status(400).json({ error: `Invalid modeOfPayment. Must be one of: ${validModes.join(', ')}` });
+  }
+
+  try {
+    // Build where clause
+    const where = {
+      tenantId,
+      ...(modeOfPayment && { modeOfPayment }),
+      ...(search && {
+        OR: [
+          { paidBy: { contains: search, mode: 'insensitive' } },
+          { phoneNumber: { contains: search, mode: 'insensitive' } },
+          { transactionCode: { contains: search, mode: 'insensitive' } },
+          { receiptNumber: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+    };
+
+    // Fetch receipts and total count concurrently
+    const [receipts, total] = await Promise.all([
+      prisma.receipt.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        select: {
+          id: true,
+          receiptNumber: true,
+          amount: true,
+          modeOfPayment: true,
+          paidBy: true,
+          transactionCode: true,
+          phoneNumber: true,
+          paymentId: true,
+          customerId: true,
+          createdAt: true,
+          payment: {
+            select: {
+              id: true,
+              amount: true,
+              modeOfPayment: true,
+              firstName: true,
+              transactionId: true,
+              receipted: true,
+              ref: true,
             },
-            receiptInvoices: {
-              include: {
-                invoice: true, // Include invoice details
+          },
+          customer: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              phoneNumber: true,
+              closingBalance: true,
+            },
+          },
+          receiptInvoices: {
+            select: {
+              id: true,
+              invoice: {
+                select: {
+                  id: true,
+                  invoiceNumber: true,
+                  invoiceAmount: true,
+                },
               },
             },
           },
-        
-        }),
-        prisma.receipt.count({ where: { tenantId } }), // Get total count for pagination
-      ]);
-  
-      // Check if receipts were found
-      if (!receipts.length) {
-        return res.status(404).json({ message: 'No receipts found.' });
-      }
-  
-      // Format the receipts
-      const formattedReceipts = receipts.map((receipt) => ({
-        ...receipt,
-        createdAt: receipt.createdAt.toISOString(), // Format createdAt
-        customer: {
-          ...receipt.customer,
-          closingBalance: receipt.customer?.closingBalance || 0, // Default to 0 if null
         },
-      }));
-  
-      // Return paginated response
-      res.status(200).json({
-        receipts: formattedReceipts,
-        total, // Total number of receipts for pagination
-        page, // Current page
-        limit, // Items per page
-        totalPages: Math.ceil(total / limit), // Total pages
-      });
-    } catch (error) {
-      console.error('Error fetching receipts:', error);
-      res.status(500).json({ error: 'Failed to fetch receipts.' });
+      }),
+      prisma.receipt.count({ where }),
+    ]);
+
+    // Check if receipts were found
+    if (!receipts.length) {
+      return res.status(404).json({ message: 'No receipts found' });
     }
-  };
+
+    // Format the receipts
+    const formattedReceipts = receipts.map((receipt) => ({
+      ...receipt,
+      createdAt: receipt.createdAt.toISOString(),
+      customer: receipt.customer
+        ? {
+            ...receipt.customer,
+            closingBalance: receipt.customer.closingBalance ?? 0,
+          }
+        : null,
+    }));
+
+    // Return paginated response
+    res.status(200).json({
+      receipts: formattedReceipts,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit),
+    });
+  } catch (error) {
+    console.error('Error fetching receipts:', error);
+    res.status(500).json({ error: 'Failed to fetch receipts' });
+  }
+};
+
   
 
 

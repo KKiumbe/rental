@@ -8,6 +8,8 @@ const prisma = new PrismaClient();
 dotenv.config();
 
 
+
+
 const register = async (req, res) => {
   const {
     firstName,
@@ -62,16 +64,13 @@ const register = async (req, res) => {
       });
     }
 
-    // Transaction to create tenant and user
+    // Transaction to create tenant, user, and log activities
     const { user, tenant } = await prisma.$transaction(async (prisma) => {
-
       const tenantCount = await prisma.tenant.count();
-     
 
       // Create tenant first
       const newTenant = await prisma.tenant.create({
         data: {
-        
           name: tenantName,
           subscriptionPlan: 'Default Plan',
           monthlyCharge: 0.0,
@@ -92,7 +91,7 @@ const register = async (req, res) => {
           gender: gender || null,
           password: hashedPassword,
           role: defaultRoles,
-          tenantId: newTenant.id, // Use newTenant.id after initialization
+          tenantId: newTenant.id,
           lastLogin: new Date(),
           loginCount: 1,
           status: 'ACTIVE',
@@ -102,7 +101,7 @@ const register = async (req, res) => {
       // Update tenant with createdBy
       await prisma.tenant.update({
         where: { id: newTenant.id },
-        data: { createdBy: newUser.id.toString() }, // String since schema expects String
+        data: { createdBy: newUser.id.toString() },
       });
 
       // Log the creation in AuditLog
@@ -113,6 +112,20 @@ const register = async (req, res) => {
           action: 'CREATE',
           resource: 'USER_TENANT',
           details: { message: `User ${newUser.email} created tenant ${tenantName}` },
+        },
+      });
+
+      // Log the creation in UserActivity
+      await prisma.userActivity.create({
+        data: {
+          user: { connect: { id: newUser.id } },
+          tenant: { connect: { id: newTenant.id } },
+          action: 'USER_TENANT_CREATED',
+          details: {
+            userEmail: newUser.email,
+            tenantName: newTenant.name,
+          },
+          timestamp: new Date(),
         },
       });
 
@@ -140,7 +153,6 @@ const register = async (req, res) => {
       },
       tenant: {
         id: tenant.id,
-       
         name: tenant.name,
       },
     });
@@ -155,6 +167,7 @@ const register = async (req, res) => {
   }
 };
 
+module.exports = register;
 
 
 

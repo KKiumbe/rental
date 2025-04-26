@@ -1,6 +1,6 @@
 const express = require('express');
 
-const { getAllInvoices, generateInvoices, cancelInvoiceById, createInvoice, getInvoiceDetails, generateInvoicesByDay, generateInvoicesPerTenant, searchInvoices, generateInvoicesForAll, cancelCustomerInvoice, invoiceCreate, createInitialInvoice } = require('../../controller/bill/billGenerator.js');
+const { getAllInvoices, generateInvoices, cancelInvoiceById, createInvoice, getInvoiceDetails, generateInvoicesByDay, generateInvoicesPerTenant, generateInvoicesForAll, cancelCustomerInvoice, invoiceCreate, createInitialInvoice } = require('../../controller/bill/billGenerator.js');
 const { SearchInvoices, searchInvoicesByPhone, searchInvoicesByName } = require('../../controller/bill/searchInvoice.js');
 const { addSmsJob } = require('../../controller/bulkSMS/sendSMSJob.js');
 const { cancelSystemGenInvoices } = require('../../controller/bill/cancelJob.js');
@@ -22,9 +22,9 @@ router.put('/invoices/cancel/:invoiceId/', verifyToken, cancelInvoiceById);
 
 // Route to create a manual invoice
 
-router.post('/invoices', verifyToken,createInvoice);
+//router.post('/invoices', verifyToken,createInvoice);
 
-router.post('/create-invoice', verifyToken,invoiceCreate);
+router.post('/create-invoice', verifyToken,createInvoice);
 router.post('/customer-onboarding-invoice', verifyToken,createInitialInvoice);
 
 

@@ -40,7 +40,7 @@ const createCustomer = async (req, res) => {
     // Check if authenticated user exists and belongs to the tenant
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
-      select: { tenantId: true, firstName: true, lastName: true },
+      select: { tenantId: true, firstName: true, lastName: true ,id:true},
     });
     if (!currentUser) {
       return res.status(404).json({
@@ -115,8 +115,9 @@ const createCustomer = async (req, res) => {
     // Log user activity
     await prisma.userActivity.create({
       data: {
-        user: { connect: { id: user } },
+        user: { connect: { id: currentUser.id } },
         tenant: { connect: { id: tenantId } },
+        customer: { connect: { id: customer.id } }, // Link to the customer
         action: `Added customer ${firstName} ${lastName} to unit ${unitId}`,
         timestamp: new Date(),
       },
@@ -197,7 +198,7 @@ const activateCustomer = async (req, res) => {
     // Validate user (assume admin role check in middleware)
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
-      select: { tenantId: true, firstName: true, lastName: true },
+      select: { tenantId: true, firstName: true, lastName: true ,id:true},
     });
     if (!currentUser || currentUser.tenantId !== tenantId) {
       return res.status(404).json({
@@ -268,7 +269,7 @@ const activateCustomer = async (req, res) => {
     // Log user activity
     await prisma.userActivity.create({
       data: {
-        user: { connect: { id: user } },
+        user: { connect: { id: currentUser.id } },
         tenant: { connect: { id: tenantId } },
         action: `Activated customer ${customerId} to ACTIVE status by ${currentUser.firstName} ${currentUser.lastName}`,
         timestamp: new Date(),

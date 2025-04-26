@@ -1,13 +1,17 @@
 const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+const getStartOfCurrentMonthUTC = () => {
+  const now = new Date();
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), 1));
+};
 
 const createWaterReading = async (req, res) => {
   const { customerId, reading } = req.body;
   const { tenantId } = req.user;
 
   // Set period to first of current month
-  const period = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  const period = getStartOfCurrentMonthUTC();
 
   // Validate required fields
   if (!customerId || reading === undefined) {
@@ -73,6 +77,9 @@ const createGasReading = async (req, res) => {
 
   // Set period to first of current month (consistent with createWaterReading)
   const period = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+
+
 
   // Validate required fields
   if (!customerId || reading === undefined) {

@@ -31,6 +31,17 @@ const getBuildingById = async (req, res) => {
         unitCount: true,
         gasRate: true,
         waterRate: true,
+        allowWaterBillingWithAverages: true,
+        allowGasBillingWithAverages: true,
+        billWater: true,
+        billGas: true,
+        billServiceCharge: true,
+        billGarbage: true,
+        billSecurity: true,
+        billAmenities: true,
+        billBackupGenerator: true,
+      
+     
         createdAt: true,
         updatedAt: true,
         landlord: {
@@ -113,9 +124,131 @@ const getBuildingById = async (req, res) => {
 
 
 
+const editBuilding = async (req, res) => {
+  const tenantId = req.user?.tenantId;
+
+  const { user } = req.user;
+  
+  console.log(`user ${user}`);// Extract user ID from authenticated user
+  const { buildingId: id } = req.params;
+  const {
+    name,
+    address,
+    unitCount,
+    gasRate,
+    waterRate,
+    allowWaterBillingWithAverages,
+    allowGasBillingWithAverages,
+    billWater,
+    billGas,
+    billServiceCharge,
+    billGarbage,
+    billSecurity,
+    billAmenities,
+    billBackupGenerator,
+  } = req.body;
+
+  // Validate tenantId and buildingId
+  if (!tenantId) {
+    return res.status(400).json({ message: 'Tenant ID is required' });
+  }
+
+  if (!id) {
+    return res.status(400).json({ message: 'Building ID is required' });
+  }
+
+  // Validate required fields
+  if (name !== undefined && !name) {
+    return res.status(400).json({ message: 'Name is required if provided' });
+  }
+
+  // Validate numeric fields
+  if (unitCount !== undefined && (isNaN(unitCount) || unitCount < 0)) {
+    return res.status(400).json({ message: 'unitCount must be a non-negative number' });
+  }
+  if (gasRate !== undefined && (isNaN(gasRate) || gasRate < 0)) {
+    return res.status(400).json({ message: 'gasRate must be a non-negative number' });
+  }
+  if (waterRate !== undefined && (isNaN(waterRate) || waterRate < 0)) {
+    return res.status(400).json({ message: 'waterRate must be a non-negative number' });
+  }
+
+  try {
+    // Check if building exists and belongs to tenant
+    const existingBuilding = await prisma.building.findUnique({
+      where: { id },
+      select: { id: true, tenantId: true, name: true },
+    });
+
+    if (!existingBuilding) {
+      return res.status(404).json({ message: 'Building not found' });
+    }
+
+    if (existingBuilding.tenantId !== tenantId) {
+      return res.status(403).json({ message: 'Building does not belong to your tenant' });
+    }
+
+    // Prepare update data, only including fields that were provided
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (address !== undefined) updateData.address = address;
+    if (unitCount !== undefined) updateData.unitCount = unitCount ? parseInt(unitCount) : null;
+    if (gasRate !== undefined) updateData.gasRate = gasRate ? parseFloat(gasRate) : null;
+    if (waterRate !== undefined) updateData.waterRate = waterRate ? parseFloat(waterRate) : null;
+    if (allowWaterBillingWithAverages !== undefined)
+      updateData.allowWaterBillingWithAverages = allowWaterBillingWithAverages;
+    if (allowGasBillingWithAverages !== undefined)
+      updateData.allowGasBillingWithAverages = allowGasBillingWithAverages;
+    if (billWater !== undefined) updateData.billWater = billWater;
+    if (billGas !== undefined) updateData.billGas = billGas;
+    if (billServiceCharge !== undefined) updateData.billServiceCharge = billServiceCharge;
+    if (billGarbage !== undefined) updateData.billGarbage = billGarbage;
+    if (billSecurity !== undefined) updateData.billSecurity = billSecurity;
+    if (billAmenities !== undefined) updateData.billAmenities = billAmenities;
+    if (billBackupGenerator !== undefined) updateData.billBackupGenerator = billBackupGenerator;
+
+    // Update the building
+    const updatedBuilding = await prisma.building.update({
+      where: { id },
+      data: updateData,
+    });
+
+    // Log the action in UserActivity
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: user } },
+        //tenantId,
+        action: `${user} UPDATED BUILDING ${updatedBuilding.name}`,
+        timestamp: new Date(),
+        tenant: { connect: { id: tenantId } },
+      },
+    });
+
+    // Format response similar to getBuildingById
+    const formattedBuilding = {
+      ...updatedBuilding,
+      buildingName: updatedBuilding.name,
+    };
+
+    res.status(200).json({ message: 'Building updated successfully', building: formattedBuilding });
+  } catch (error) {
+    console.error('Error updating building:', error);
+    if (error.code === 'P2025') {
+      return res.status(404).json({ message: 'Building not found' });
+    }
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
+  }
+};
+
+
+
+
+
 
 const createBuilding = async (req, res) => {
-    const { tenantId } = req.user; // Extract tenantId from authenticated user
+    const { tenantId ,user} = req.user; // Extract tenantId from authenticated user
   const {landlordId, name, address, unitCount, gasRate, waterRate } = req.body;
 
   // Validate required fields
@@ -133,6 +266,24 @@ const createBuilding = async (req, res) => {
   if (waterRate !== undefined && (isNaN(waterRate) || waterRate < 0)) {
     return res.status(400).json({ message: 'waterRate must be a non-negative number.' });
   }
+
+  const currentUser = await prisma.user.findUnique({
+    where: { id: user },
+    select: { firstName: true, lastName: true, tenantId: true ,id:true},
+  });
+  if (!currentUser) {
+    return res.status(404).json({
+      success: false,
+      message: 'Authenticated user not found.',
+    });
+  }
+  if (currentUser.tenantId !== tenantId) {
+    return res.status(403).json({
+      success: false,
+      message: 'User does not belong to the specified tenant.',
+    });
+  }
+
 
   try {
     // Check if tenant exists
@@ -168,6 +319,16 @@ const createBuilding = async (req, res) => {
         unitCount: unitCount ? parseInt(unitCount) : null,
         gasRate: gasRate ? parseFloat(gasRate) : null,
         waterRate: waterRate ? parseFloat(waterRate) : null,
+      },
+    });
+
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: currentUser.id } },
+        tenant: { connect: { id: tenantId } },
+        
+        action: `${currentUser.firstName} CREATED BUILDING ${building.name}`,
+        timestamp: new Date(),
       },
     });
 
@@ -258,6 +419,8 @@ const getAllBuildings = async (req, res) => {
         },
       },
     });
+
+ 
 
     // Format response to include buildingName and landlord name
     const formattedBuildings = buildings.map((building) => ({
@@ -418,6 +581,7 @@ const createUnit = async (req, res) => {
       data: {
         user: { connect: { id: user } },
         tenant: { connect: { id: tenantId } },
+
         action: `CREATED UNIT ${unitNumber} IN BUILDING ${building.name}`,
         timestamp: new Date(),
       },
@@ -559,4 +723,4 @@ const getUnitsByBuilding = async (req, res) => {
 
 
 
-module.exports = { createBuilding, searchBuildings ,createUnit, getAllBuildings, getBuildingById, getUnitsByBuilding };
+module.exports = { createBuilding, searchBuildings ,createUnit, getAllBuildings, getBuildingById, getUnitsByBuilding ,editBuilding};

@@ -43,7 +43,7 @@ const createLandlord = async (req, res) => {
     // Check if authenticated user exists and belongs to the tenant
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
-      select: { firstName: true, lastName: true, tenantId: true },
+      select: { firstName: true, lastName: true, tenantId: true ,id:true},
     });
     if (!currentUser) {
       return res.status(404).json({
@@ -89,15 +89,15 @@ const createLandlord = async (req, res) => {
     });
 
 
-       // Create user activity log
-       await prisma.userActivity.create({
-        data: {
-          user: { connect: { id: user } }, // Connect user relation
-          tenant: { connect: { id: tenantId } }, // Connect tenant relation
-          action: `Added landlord ${firstName} ${lastName}`,
-          timestamp: new Date(),
-        },
-      });
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: currentUser.id } },
+        tenant: { connect: { id: tenantId } },
+        //customer: { connect: { id: customerId } }, // Link to the customer
+        action: `${currentUser.firstName} Added  landlord ${firstName} ${lastName}`,
+        timestamp: new Date(),
+      },
+    });
 
     return res.status(201).json({
       success: true,
@@ -254,6 +254,8 @@ const getAllLandlords = async (req, res) => {
         email: true,
         phoneNumber: true,
         status: true,
+        createdAt: true,
+        updatedAt: true,
       },
       orderBy: { firstName: 'asc' },
     });
@@ -275,7 +277,46 @@ const getAllLandlords = async (req, res) => {
 
 
 
-module.exports = { getBuildingsByLandlord , createLandlord , searchLandlords ,getAllLandlords};
+
+const getLandlordById = async (req, res) => {
+  try {
+    const { id } = req.params; // Get landlord ID from URL params
+    const currentUser = req.user; // Assuming auth middleware sets req.user with currentUser (including tenantId)
+
+    if (!currentUser || !currentUser.tenantId) {
+      return res.status(401).json({ message: 'Unauthorized: Tenant ID missing.' });
+    }
+
+    // Fetch the landlord by ID, ensuring it belongs to the user's tenant
+    const landlord = await prisma.landlord.findFirst({
+      where: {
+        id: id,
+        tenantId: currentUser.tenantId, // Ensure landlord belongs to the user's tenant
+      },
+      include: {
+       
+        buildings: true, // Include related buildings
+      },
+    });
+
+    // Check if landlord exists
+    if (!landlord) {
+      return res.status(404).json({ message: 'Landlord not found or you do not have access.' });
+    }
+
+    // Return the landlord details
+    return res.status(200).json({ landlord });
+  } catch (error) {
+    console.error('Error fetching landlord:', error);
+    return res.status(500).json({ message: 'Internal server error.' });
+  }
+};
+
+
+
+
+
+module.exports = { getBuildingsByLandlord , createLandlord , searchLandlords ,getAllLandlords, getLandlordById };
 
 
 

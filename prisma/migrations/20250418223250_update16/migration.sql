@@ -39,3 +39,5 @@ ALTER TABLE "_TerminationInvoices" ADD CONSTRAINT "_TerminationInvoices_A_fkey" 
 
 -- AddForeignKey
 ALTER TABLE "_TerminationInvoices" ADD CONSTRAINT "_TerminationInvoices_B_fkey" FOREIGN KEY ("B") REFERENCES "LeaseTermination"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+DROP TABLE IF EXISTS "todo";

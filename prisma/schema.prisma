@@ -190,14 +190,20 @@ model User {
 model UserActivity {
   id          Int       @id @default(autoincrement())
   userId      Int
-  tenantId     Int
-  action      String    // e.g., 'LOGIN', 'LOGOUT', 'VIEW'
+  tenantId    Int
+  customerId  String?   // Optional: Links to the customer affected by the action
+  action      String    // e.g., 'LOGIN', 'LOGOUT', 'VIEW', 'ADDED_CUSTOMER', 'UPDATED_CUSTOMER'
   timestamp   DateTime  @default(now())
-
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+   details     Json?     // Stores changed fields and their old/new values
 
   // Relationships
-  user        User      @relation(fields: [userId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([customerId])
 }
 
 
@@ -211,20 +217,27 @@ enum UserStatus {
 
 
 
-// Audit Log model for tracking user actions
 model AuditLog {
   id          String       @id @default(uuid())
   tenantId    Int
   userId      Int
-  action      String   // e.g., 'CREATE', 'UPDATE', 'DELETE'
-  resource    String   // e.g., 'USER', 'INVOICE'
-  details     Json?    // Additional action details
-  description  String?
-  createdAt   DateTime @default(now())
+  customerId  String?      // Optional: Links to the customer affected by the action
+  action      String       // e.g., 'CREATE', 'UPDATE', 'DELETE', 'POST'
+  resource    String       // e.g., 'CUSTOMER', 'INVOICE', 'PAYMENT'
+  details     Json?        // Additional action details (e.g., changed fields)
+  description String?      // Human-readable description
+  createdAt   DateTime     @default(now())
 
   // Relationships
-  tenant      Tenant   @relation(fields: [tenantId], references: [id])
-  user        User     @relation(fields: [userId], references: [id])
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([customerId])
+  @@index([tenantId])
+  @@index([userId])
+  @@index([action])
+
 }
 
 // SMS Configuration model defined per tenant
@@ -280,24 +293,32 @@ model Landlord {
   @@index([email])
 }
 
-// Building model
 model Building {
-  id          String    @id @default(uuid())
-  tenantId    Int
-  landlordId  String
-  name        String
-  address     String?
-  unitCount   Int?
-  gasRate     Float?
-  waterRate   Float?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  landlord    Landlord  @relation(fields: [landlordId], references: [id], onDelete: Cascade)
-  units       Unit[]
+  id                         String    @id @default(uuid())
+  tenantId                   Int
+  landlordId                 String
+  name                       String
+  address                    String?
+  unitCount                  Int?
+  gasRate                    Float?
+  waterRate                  Float?
+  allowWaterBillingWithAverages Boolean @default(false)
+  allowGasBillingWithAverages Boolean @default(false) // New field for gas billing
+  billWater                  Boolean @default(false)
+  billGas                    Boolean @default(false)
+  billServiceCharge          Boolean @default(false)
+  billGarbage                Boolean @default(false)
+  billSecurity               Boolean @default(false)
+  billAmenities              Boolean @default(false)
+  billBackupGenerator        Boolean @default(false)
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+  tenant                     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  landlord                   Landlord  @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  units                      Unit[]
+  Customer                   Customer[]
   @@index([tenantId])
   @@index([landlordId])
-  Customer Customer[]
 }
 
 // Enum for landlord status
@@ -308,24 +329,28 @@ enum LandlordStatus {
 
 
 model Unit {
-  id                String          @id @default(uuid())
-  tenantId          Int             // Links to tenant
-  buildingId        String          // Links to building
-  unitNumber        String          // e.g., "A12"
-  monthlyCharge     Float           // Monthly rent for this unit
-  depositAmount     Float           // Deposit required for this unit
-  garbageCharge     Float?          // Optional fixed monthly garbage fee
-  serviceCharge     Float?          // Optional fixed monthly service charge
-  status            UnitStatus      @default(VACANT) // e.g., VACANT, OCCUPIED
-  createdAt         DateTime        @default(now())
-  updatedAt         DateTime        @updatedAt
-  tenant            Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  building          Building        @relation(fields: [buildingId], references: [id], onDelete: Cascade)
-  customers         Customer[]      // Customers assigned to this unit
+  id                 String          @id @default(uuid())
+  tenantId           Int             // Links to tenant
+  buildingId         String          // Links to building
+  unitNumber         String          // e.g., "A12"
+  monthlyCharge      Float           // Monthly rent for this unit
+  depositAmount      Float           // Deposit required for this unit
+  garbageCharge      Float?          // Optional fixed monthly garbage fee
+  serviceCharge      Float?          // Optional fixed monthly service charge
+  securityCharge     Float?          // Optional fixed monthly security charge
+  amenitiesCharge    Float?          // Optional fixed monthly amenities charge
+  backupGeneratorCharge Float?       // Optional fixed monthly backup generator charge
+  status             UnitStatus      @default(VACANT) // e.g., VACANT, OCCUPIED
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  building           Building        @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  customers          Customer[]      // Customers assigned to this unit
   @@index([tenantId])
   @@index([buildingId])
   @@index([unitNumber])
-  Invoice Invoice[]
+  Invoice            Invoice[]
+               
 }
 
 
@@ -373,6 +398,8 @@ model Customer {
   @@index([status])
   Building Building[]
   LeaseTermination LeaseTermination[]
+  AuditLog AuditLog[]
+  UserActivity UserActivity[]
 }
 
   model Deposit {

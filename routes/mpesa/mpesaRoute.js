@@ -3,7 +3,7 @@ const router = express.Router();
 const { PrismaClient } = require('@prisma/client');
 const { lipaNaMpesa } = require('../../controller/mpesa/payment.js');
 const prisma = new PrismaClient();
-const { settleInvoice } = require('../../controller/mpesa/paymentSettlement.js');
+const  {settleInvoice}  = require('../../controller/mpesa/paymentSettlement.js');
 
 // Route to handle M-Pesa callback notifications
 router.post('/callback', async (req, res) => {

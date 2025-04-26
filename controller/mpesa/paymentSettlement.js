@@ -1,4 +1,4 @@
-const { PrismaClient,InvoiceStatus } = require('@prisma/client');
+const { PrismaClient } = require('@prisma/client');
 const { sendSMS } = require('../sms/sms');
 
 const prisma = new PrismaClient();
@@ -201,7 +201,7 @@ async function processInvoices(paymentAmount, customerId, paymentId, tenantId) {
             customerId,
             tenantId,
             status: {
-                in: [InvoiceStatus.UNPAID, InvoiceStatus.PPAID],
+                in: ['UNPAID', 'PPAID'],
             },
         },
         orderBy: { createdAt: 'asc' }, // Process oldest invoices first
@@ -260,7 +260,7 @@ async function processInvoices(paymentAmount, customerId, paymentId, tenantId) {
             where: { id: invoice.id },
             data: {
                 amountPaid: invoice.amountPaid + paymentForInvoice,
-                status: invoice.amountPaid + paymentForInvoice >= invoice.invoiceAmount ?  InvoiceStatus.PAID : InvoiceStatus.PPAID,
+                status: invoice.amountPaid + paymentForInvoice >= invoice.invoiceAmount ? 'PAID' : 'PPAID',
             },
         });
 
@@ -273,7 +273,7 @@ async function processInvoices(paymentAmount, customerId, paymentId, tenantId) {
     }
 
     // Update customer's closingBalance based on amount paid to invoices
-    const newClosingBalance = currentBalance - totalPaidToInvoices;
+    const newClosingBalance = currentBalance - (totalPaidToInvoices + remainingAmount);
 
     await prisma.customer.update({
         where: { id: customerId },
@@ -282,19 +282,13 @@ async function processInvoices(paymentAmount, customerId, paymentId, tenantId) {
 
 
 
+    // Add remaining amount to receipts
     if (remainingAmount > 0) {
-        const updatedBalance = newClosingBalance - remainingAmount;
-        await prisma.customer.update({
-            where: { id: customerId },
-            data: { closingBalance: updatedBalance },
-        });
         receipts.push({
-            invoiceId: null,
-            amount: remainingAmount,
+          invoiceId: null,
+          amount: remainingAmount,
         });
-        remainingAmount = 0;
-        return { receipts, remainingAmount, newClosingBalance: updatedBalance };
-    }
+      }
 
     return { receipts, remainingAmount, newClosingBalance };
 }

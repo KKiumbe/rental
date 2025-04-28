@@ -32,8 +32,7 @@ const getAllUsers = async (req, res) => {
         lastName: true,
         email: true,
         role: true,
-        bagsHeld:true,
-        originalBagsIssued:true,
+      
         createdBy:true,
         status:true,
         createdAt: true,
@@ -405,8 +404,7 @@ const fetchUser = async (req, res) => {
         county: true,
         town: true,
         role: true,
-        bagsHeld: true,
-        originalBagsIssued: true,
+       
         status: true,
         createdAt: true,
         updatedAt: true,

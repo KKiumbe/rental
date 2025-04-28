@@ -186,7 +186,7 @@ const getTenantDetails = async (req, res) => {
         subscriptionPlan: true,
         monthlyCharge: true,
         paymentDetails:true,
-        numberOfBags: true,
+       
         createdAt: true,
         updatedAt: true,
         email: true,

@@ -150,7 +150,7 @@ const server = app.listen(5000, '0.0.0.0', () => {
 
 
 // Set server timeout
-const timeoutDuration = 80000; // Set timeout duration in milliseconds (e.g., 60000 ms = 60 seconds)
+const timeoutDuration = 800000; // Set timeout duration in milliseconds (e.g., 60000 ms = 60 seconds)
 server.setTimeout(timeoutDuration, () => {
   console.log(`Server timed out after ${timeoutDuration / 9000} seconds.`);
 });

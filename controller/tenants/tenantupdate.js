@@ -244,7 +244,7 @@ const fetchTenant = async (tenantId) => {
         status: true,
         subscriptionPlan: true,
         monthlyCharge: true,
-        numberOfBags: true,
+       
         paymentDetails: true,
         email: true,
         phoneNumber: true,

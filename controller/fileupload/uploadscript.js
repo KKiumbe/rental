@@ -3,11 +3,11 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const csv = require('csv-parser');
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, CustomerStatus, LandlordStatus, UnitStatus } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 // Create uploads directory if it doesn't exist
-const uploadsDir = path.join(__dirname, '..', 'uploads');
+const uploadsDir = path.join(__dirname, '..', 'Uploads');
 if (!fs.existsSync(uploadsDir)) {
   fs.mkdirSync(uploadsDir);
 }
@@ -15,304 +15,195 @@ if (!fs.existsSync(uploadsDir)) {
 // Configure multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, uploadsDir); // Save to uploads directory
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`); // Append timestamp to filename
+    cb(null, `${Date.now()}-${file.originalname}`);
   },
 });
 
 const upload = multer({ storage });
 
-// Helper function to validate and transform customer data
-const validateCustomerData = (data) => {
-  const requiredFields = [
-    'firstName',
-    'lastName',
-    'phoneNumber',
-    'monthlyCharge',
-    'estateName',
-    'building',
-    'closingBalance'
-  ];
-
-  // Trim whitespace from all fields
-  const trimmedData = {};
-  for (const field in data) {
-    trimmedData[field] = typeof data[field] === 'string' ? data[field].trim() : data[field];
-  }
-
-  // Check for missing or empty required fields
-  for (const field of requiredFields) {
-    if (!trimmedData[field] || trimmedData[field] === '') {
-      console.warn(`Missing or empty required field: ${field} for customer ${trimmedData.firstName || 'Unknown'}`);
-      return null;
-    }
-  }
-
-  // Validate numeric fields
-  const monthlyCharge = parseFloat(trimmedData.monthlyCharge);
-  const closingBalance = parseFloat(trimmedData.closingBalance);
-  if (isNaN(monthlyCharge)) {
-    console.warn(`Invalid monthlyCharge: ${trimmedData.monthlyCharge} for customer ${trimmedData.firstName || 'Unknown'}`);
-    return null;
-  }
-  if (isNaN(closingBalance)) {
-    console.warn(`Invalid closingBalance: ${trimmedData.closingBalance} for customer ${trimmedData.firstName || 'Unknown'}`);
-    return null;
-  }
-
-  // Set garbageCollectionDay to "MONDAY" if not provided or empty
-  const garbageCollectionDay = trimmedData.garbageCollectionDay ? trimmedData.garbageCollectionDay.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : 'MONDAY';
-
-  // Parse fields
-  return {
-    firstName: trimmedData.firstName,
-    lastName: trimmedData.lastName,
-    email: trimmedData.email || null,
-    phoneNumber: trimmedData.phoneNumber,
-    secondaryPhoneNumber: trimmedData.secondaryPhoneNumber || null,
-    gender: trimmedData.gender || null,
-    county: trimmedData.county || null,
-    town: trimmedData.town || null,
-    location: trimmedData.location || null,
-    estateName: trimmedData.estateName,
-    building: trimmedData.building,
-    houseNumber: trimmedData.houseNumber || null,
-    category: trimmedData.category || null,
-    monthlyCharge: monthlyCharge,
-    status: 'ACTIVE', // default status
-    garbageCollectionDay: garbageCollectionDay,
-    collected: trimmedData.collected ? trimmedData.collected.toLowerCase() === 'true' : false,
-    closingBalance: closingBalance,
-  };
+const sanitizePhoneNumber = (phone) => {
+  if (typeof phone !== 'string') return '';
+  if (phone.startsWith('+254')) return '0' + phone.slice(4);
+  if (phone.startsWith('254')) return '0' + phone.slice(3);
+  return phone;
 };
 
-// Controller function to upload and process CSV
+
+
+
+
 const uploadCustomers = async (req, res) => {
-  const { tenantId } = req.user; // Extract tenantId from the authenticated user
-  console.log('Tenant ID from authenticated user:', tenantId);
+  const {tenantId,user:userId} = req.user;
 
-  if (!tenantId) {
-    return res.status(403).json({ message: 'Tenant ID is required for uploading customers.' });
+
+  if (!tenantId || !userId) {
+    return res.status(400).json({ success: false, message: 'Tenant or User ID missing.' });
   }
 
   if (!req.file) {
-    return res.status(400).json({ message: 'No file uploaded' });
+    return res.status(400).json({ success: false, message: 'No file uploaded.' });
   }
 
-  const filePath = path.join(uploadsDir, req.file.filename);
-  const customers = [];
-  const existingPhoneNumbers = new Set();
-  const requiredFields = [
-    'firstName',
-    'lastName',
-    'phoneNumber',
-    'monthlyCharge',
-    'estateName',
-    'building',
-    'closingBalance'
-  ];
+  const filePath = req.file.path;
+  const customersToCreate = [];
+  const errors = [];
 
   try {
-    // Validate tenantId
-    const tenantExists = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
+    const processCSV = () => {
+      return new Promise((resolve, reject) => {
+        const rows = [];
 
-    if (!tenantExists) {
-      return res.status(404).json({ message: 'Invalid tenant ID. Tenant does not exist.' });
+        fs.createReadStream(filePath)
+          .pipe(csv())
+          .on('data', (row) => rows.push(row))
+          .on('end', async () => {
+            for (const row of rows) {
+              try {
+                const sanitizedPhoneNumber = sanitizePhoneNumber(row.phoneNumber);
+                const landlordPhoneNumber = sanitizePhoneNumber(row.landlordPhoneNumber);
+
+                // 1. Find or create landlord
+                let landlord = await prisma.landlord.findFirst({
+                  where: { tenantId, phoneNumber: landlordPhoneNumber }
+                });
+
+                if (!landlord) {
+                  landlord = await prisma.landlord.create({
+                    data: {
+                      tenantId,
+                      firstName: row.landlordFirstName?.trim() || 'Unknown',
+                      lastName: row.landlordLastName?.trim() || 'Unknown',
+                      phoneNumber: landlordPhoneNumber,
+                      status: LandlordStatus.ACTIVE,
+                     
+                      createdAt: new Date(),
+                      updatedAt: new Date(),
+                    }
+                  });
+                }
+
+                // 2. Find or create building
+                const buildingName = row.buildingName?.trim();
+                if (!buildingName) {
+                  errors.push({ row, reason: 'Missing building name' });
+                  continue;
+                }
+
+                let building = await prisma.building.findFirst({
+                  where: { tenantId, landlordId: landlord.id, name: buildingName }
+                });
+
+                if (!building) {
+                  building = await prisma.building.create({
+                    data: {
+                      tenantId,
+                      landlordId: landlord.id,
+                      name: buildingName,
+                      billGarbage: row.billGarbage?.toLowerCase() === 'true',
+                      billService: row.billService?.toLowerCase() === 'true',
+                      billSecurity: row.billSecurity?.toLowerCase() === 'true',
+                      billAmenities: row.billAmenities?.toLowerCase() === 'true',
+                      billBackupGenerator: row.billBackupGenerator?.toLowerCase() === 'true',
+                      billWater: row.billWater?.toLowerCase() === 'true',
+                      waterRate: row.waterRate ? parseFloat(row.waterRate) : null,
+                      location: row.buildingLocation || '',
+                    
+                      createdAt: new Date(),
+                      updatedAt: new Date(),
+                    }
+                  });
+                }
+
+                // 3. Find or create unit
+                const unitNumber = row.unitNumber?.trim();
+                if (!unitNumber) {
+                  errors.push({ row, reason: 'Missing unit number' });
+                  continue;
+                }
+
+                let unit = await prisma.unit.findFirst({
+                  where: { tenantId, buildingId: building.id, unitNumber }
+                });
+
+                if (!unit) {
+                  unit = await prisma.unit.create({
+                    data: {
+                      tenantId,
+                      buildingId: building.id,
+                      landlordId: landlord.id,
+                      unitNumber,
+                      monthlyCharge: parseFloat(row.monthlyCharge) || 0,
+                      depositAmount: row.depositAmount ? parseFloat(row.depositAmount) : 0,
+                      garbageCharge: row.garbageCharge ? parseFloat(row.garbageCharge) : null,
+                      serviceCharge: row.serviceCharge ? parseFloat(row.serviceCharge) : null,
+                      securityCharge: row.securityCharge ? parseFloat(row.securityCharge) : null,
+                      amenitiesCharge: row.amenitiesCharge ? parseFloat(row.amenitiesCharge) : null,
+                      backupGeneratorCharge: row.backupGeneratorCharge ? parseFloat(row.backupGeneratorCharge) : null,
+                      status: UnitStatus.OCCUPIED,
+                     
+                      createdAt: new Date(),
+                      updatedAt: new Date(),
+                    }
+                  });
+                }
+
+                // 4. Create customer
+                customersToCreate.push({
+                  tenantId,
+                  firstName: row.firstName?.trim() || '',
+                  lastName: row.lastName?.trim() || '',
+                  phoneNumber: sanitizedPhoneNumber,
+                  
+                  unitId: unit.id,
+                  closingBalance: parseFloat(row.closingBalance) || 0,
+                 
+                  status: CustomerStatus.ACTIVE,
+                  
+                  createdAt: new Date(),
+                  updatedAt: new Date(),
+                });
+              } catch (err) {
+                console.error('Row error:', err);
+                errors.push({ row, reason: err.message });
+              }
+            }
+            resolve();
+          })
+          .on('error', (error) => {
+            reject(error);
+          });
+      });
+    };
+
+    await processCSV();
+
+    if (customersToCreate.length > 0) {
+      await prisma.customer.createMany({ data: customersToCreate });
     }
 
-    // Fetch existing customer data for this tenant to prevent duplicates
-    const existingCustomers = await prisma.customer.findMany({
-      where: { tenantId },
-      select: { phoneNumber: true },
-    });
-
-    existingCustomers.forEach((customer) => {
-      if (customer.phoneNumber) existingPhoneNumbers.add(customer.phoneNumber);
-    });
-
-    // Validate CSV headers
-    let headersValidated = false;
-    let headers = [];
-
-    const stream = fs.createReadStream(filePath).pipe(csv());
-
-    stream
-      .on('headers', (headerList) => {
-        headers = headerList.map((header) => header.trim()); // Trim any whitespace from headers
-        const missingFields = requiredFields.filter((field) => !headers.includes(field));
-
-        if (missingFields.length > 0) {
-          stream.destroy(); // Stop the stream
-          fs.unlinkSync(filePath); // Delete the uploaded file
-          return res.status(400).json({
-            message: `CSV file is missing required fields: ${missingFields.join(', ')}. Required fields are: ${requiredFields.join(', ')}`,
-          });
-        }
-
-        // Check for extra fields
-        const extraFields = headers.filter((header) =>
-          !requiredFields.includes(header) &&
-          !['email', 'secondaryPhoneNumber', 'gender', 'county', 'town', 'location', 'houseNumber', 'category', 'collected', 'garbageCollectionDay'].includes(header)
-        );
-        if (extraFields.length > 0) {
-          stream.destroy(); // Stop the stream
-          fs.unlinkSync(filePath); // Delete the uploaded file
-          return res.status(400).json({
-            message: `CSV file contains invalid fields: ${extraFields.join(', ')}. Only allowed fields are: ${requiredFields.join(', ')} plus optional fields (email, secondaryPhoneNumber, gender, county, town, location, houseNumber, category, collected, garbageCollectionDay)`,
-          });
-        }
-
-        headersValidated = true;
-      })
-      .on('data', (data) => {
-        if (!headersValidated) return; // Skip data processing if headers are invalid
-
-        const customer = validateCustomerData(data);
-        if (!customer) return; // Skip invalid data
-
-        // Check for duplicate phone numbers within the tenant
-        if (existingPhoneNumbers.has(customer.phoneNumber)) {
-          console.warn(`Duplicate phone number found: ${customer.phoneNumber}. Skipping entry.`);
-          return;
-        }
-
-        // Add tenantId to each customer
-        customer.tenantId = tenantId;
-
-        // Add to customers array if valid
-        customers.push(customer);
-        existingPhoneNumbers.add(customer.phoneNumber);
-      })
-      .on('end', async () => {
-        if (!headersValidated) return; // If headers were invalid, the response was already sent
-
-        try {
-          if (customers.length > 0) {
-            await prisma.customer.createMany({ data: customers });
-            res.status(200).json({ message: 'Customers uploaded successfully', customers });
-          } else {
-            res.status(400).json({ message: 'No valid customers to upload' });
-          }
-        } catch (error) {
-          console.error('Error saving customers:', error);
-          res.status(500).json({ message: 'Error saving customers' });
-        } finally {
-          // Clean up the uploaded file
-          fs.unlinkSync(filePath);
-        }
-      })
-      .on('error', (error) => {
-        console.error('Error reading CSV file:', error);
-        res.status(500).json({ message: 'Error processing file' });
-      });
-  } catch (error) {
-    console.error('Error validating tenant or fetching existing customers:', error);
-    res.status(500).json({ message: 'Error validating tenant or checking existing customers.' });
-  }
-};
-
-
-
-const updateCustomersClosingBalance = async (req, res) => {
-  const { tenantId } = req.user;
-
-  if (!tenantId) {
-    return res.status(403).json({ message: 'Tenant ID is required for updating balances.' });
-  }
-
-  if (!req.file) {
-    return res.status(400).json({ message: 'No file uploaded' });
-  }
-
-  const filePath = path.join(uploadsDir, req.file.filename);
-  const updates = [];
-  const requiredFields = ['phoneNumber', 'closingBalance'];
-
-  try {
-    const tenantExists = await prisma.tenant.findUnique({ where: { id: tenantId } });
-    if (!tenantExists) {
-      fs.unlinkSync(filePath);
-      return res.status(404).json({ message: 'Invalid tenant ID. Tenant does not exist.' });
-    }
-
-    let headersValidated = false;
-    let headers = [];
-
-    const stream = fs.createReadStream(filePath).pipe(csv());
-
-    stream
-      .on('headers', (headerList) => {
-        headers = headerList.map((header) => header.trim());
-        const missingFields = requiredFields.filter((field) => !headers.includes(field));
-        if (missingFields.length > 0) {
-          stream.destroy();
-          fs.unlinkSync(filePath);
-          return res.status(400).json({
-            message: `CSV file is missing required fields: ${missingFields.join(', ')}. Required fields are: ${requiredFields.join(', ')}`,
-          });
-        }
-        const extraFields = headers.filter((header) => !requiredFields.includes(header));
-        if (extraFields.length > 0) {
-          stream.destroy();
-          fs.unlinkSync(filePath);
-          return res.status(400).json({
-            message: `CSV file contains invalid fields: ${extraFields.join(', ')}. Only allowed fields are: ${requiredFields.join(', ')}`,
-          });
-        }
-        headersValidated = true;
-      })
-      .on('data', (data) => {
-        if (!headersValidated) return;
-        const phoneNumber = data.phoneNumber?.trim();
-        const closingBalance = parseFloat(data.closingBalance);
-        if (!phoneNumber || isNaN(closingBalance)) {
-          console.warn(`Invalid data: phoneNumber=${phoneNumber}, closingBalance=${data.closingBalance}`);
-          return;
-        }
-        updates.push({ phoneNumber, closingBalance });
-      })
-      .on('end', async () => {
-        if (!headersValidated) return;
-        if (updates.length === 0) {
-          fs.unlinkSync(filePath);
-          return res.status(400).json({ message: 'No valid data found in the CSV file' });
-        }
-        try {
-          const updatePromises = updates.map((update) =>
-            prisma.customer.updateMany({
-              where: { phoneNumber: update.phoneNumber, tenantId },
-              data: { closingBalance: update.closingBalance },
-            })
-          );
-          const results = await Promise.all(updatePromises);
-          const updatedCount = results.reduce((sum, result) => sum + result.count, 0);
-          if (updatedCount === 0) {
-            res.status(404).json({ message: 'No customers found to update with the provided phone numbers' });
-          } else {
-            res.status(200).json({ message: `Successfully updated ${updatedCount} customer(s)`, updatedCount, updates });
-          }
-        } catch (error) {
-          console.error('Error updating customers:', error);
-          res.status(500).json({ message: 'Error updating customer balances' });
-        } finally {
-          fs.unlinkSync(filePath);
-        }
-      })
-      .on('error', (error) => {
-        console.error('Error reading CSV file:', error);
-        fs.unlinkSync(filePath);
-        res.status(500).json({ message: 'Error processing CSV file' });
-      });
-  } catch (error) {
-    console.error('Error in updateCustomersClosingBalance:', error);
     fs.unlinkSync(filePath);
-    res.status(500).json({ message: 'Server error during update process' });
+
+    res.status(200).json({
+      success: true,
+      message: `${customersToCreate.length} customers created successfully.`,
+      errors: errors.length > 0 ? errors : null,
+    });
+  } catch (error) {
+    console.error('Upload error:', error);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+    res.status(500).json({ success: false, message: 'Error uploading customers', error: error.message });
   }
 };
+
+
+
+
+
 
 // New controller function to update customer details (estateName, building, houseNumber, category)
 const updateCustomersDetails = async (req, res) => {
@@ -441,6 +332,5 @@ const updateCustomersDetails = async (req, res) => {
 module.exports = {
   upload,
   uploadCustomers,
-  updateCustomersClosingBalance,
   updateCustomersDetails,
 };

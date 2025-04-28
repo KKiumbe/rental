@@ -387,77 +387,145 @@ const sendSMS = async (tenantId, mobile, message) => {
       await prisma.$disconnect();
     }
   };
+
+
+
+
+  const sendCustomSmsAboveBalance = async (req, res) => {
+    const { tenantId, user } = req.user;
+    const { balance, message: customMessage } = req.body;
+  
+    // Validate request body
+    if (!customMessage || typeof customMessage !== 'string') {
+      return res.status(400).json({ error: 'Custom message is required and must be a string.' });
+    }
+    if (!balance || typeof balance !== 'number' || balance < 0) {
+      return res.status(400).json({ error: 'Balance threshold is required and must be a non-negative number.' });
+    }
+  
+    try {
+      // Fetch SMS config and paybill
+      const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
+      const paybill = await getShortCode(tenantId);
+   
+      // Fetch active customers with closingBalance above the specified threshold
+      const eligibleCustomers = await prisma.customer.findMany({
+        where: {
+          tenantId,
+          status: 'ACTIVE',
+          closingBalance: { gt: balance }, // Filter customers with balance > specified threshold
+        },
+        select: {
+          id: true,
+          phoneNumber: true,
+          firstName: true,
+          closingBalance: true,
+        },
+      });
+  
+      if (eligibleCustomers.length === 0) {
+        return res.status(200).json({
+          message: `No active customers found with balance above ${balance}.`,
+        });
+      }
+  
+      const messages = [];
+      const errors = [];
+      const messagedCustomerIds = [];
+  
+      // Process each customer
+      for (const customer of eligibleCustomers) {
+        // Skip if no valid phone number
+        const mobile = sanitizePhoneNumber(customer.phoneNumber);
+        if (!mobile) {
+          errors.push({
+            customerId: customer.id,
+            message: 'No valid phone number available.',
+          });
+          continue;
+        }
+  
+        // Construct SMS message similar to sendBills
+        const balanceText =
+          customer.closingBalance < 0
+            ? `overpayment of KES ${Math.abs(customer.closingBalance).toFixed(2)}`
+            : `KES ${customer.closingBalance.toFixed(2)}`;
+        const smsMessage = `Dear ${customer.firstName}, ${customMessage} Your balance is ${balanceText}. Paybill: ${paybill}, Acct: ${mobile}. Inquiries? ${customerSupport}`;
+  
+        messages.push({ mobile, message: smsMessage });
+        messagedCustomerIds.push(customer.id);
+      }
+  
+      if (messages.length === 0) {
+        return res.status(200).json({
+          message: 'No valid messages to send due to invalid phone numbers.',
+          errors,
+        });
+      }
+  
+      // Batch size limit (consistent with sendToAll)
+      const batchSize = 500;
+      const smsResponses = [];
+  
+      // Process messages in batches
+      for (let i = 0; i < messages.length; i += batchSize) {
+        const batch = messages.slice(i, i + batchSize);
+        try {
+          const batchResponses = await sendSms(tenantId, batch); // Call sendSms with tenantId and batch
+          smsResponses.push(...batchResponses);
+        } catch (batchError) {
+          console.error(`Error sending batch ${i / batchSize + 1}:`, batchError);
+          smsResponses.push(
+            ...batch.map((msg) => ({
+              phoneNumber: msg.mobile,
+              status: 'error',
+              details: batchError.message,
+            }))
+          );
+        }
+      }
+  
+      // Log to UserActivity (similar to sendBills)
+      await prisma.userActivity.create({
+        data: {
+          user: { connect: { id: user } },
+          tenant: { connect: { id: tenantId } },
+          action: `Custom SMS sent to ${messages.length} customers with balance above ${balance}`,
+          details: {
+            customerIds: messagedCustomerIds,
+            balanceThreshold: balance,
+            customMessage,
+          },
+          timestamp: new Date(),
+        },
+      });
+  
+      // Respond with success message and all SMS responses
+      res.status(200).json({
+        success: true,
+        message: `SMS sent to ${messages.length} customers with balance above ${balance} in ${Math.ceil(messages.length / batchSize)} batches.`,
+        count: messages.length,
+        totalProcessed: eligibleCustomers.length,
+        smsResponses,
+        errors,
+        totalErrors: errors.length,
+      });
+    } catch (error) {
+      console.error('Error sending custom SMS to customers above balance:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to send custom SMS to customers.',
+        details: error.message,
+      });
+    } finally {
+      await prisma.$disconnect();
+    }
+  };
   
 
 
 
 
-const sendBillsEstate = async (req, res) => {
-  const { tenantId } = req.user;
-  const { estateName } = req.body; // Extract estateName from request body
-
-  // Validate estateName in the request body
-  if (!estateName || typeof estateName !== 'string') {
-    return res.status(400).json({ error: 'Estate name is required and must be a string.' });
-  }
-
-  try {
-    // Fetch SMS configuration and paybill for the tenant
-    const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
-    const paybill = await getShortCode(tenantId);
-
-    // Fetch active customers for the tenant in the specified estate (case-insensitive)
-    const activeCustomers = await prisma.customer.findMany({
-      where: {
-        tenantId: tenantId,
-        status: 'ACTIVE',
-        estateName: {
-          equals: estateName,
-          mode: 'insensitive', // Case-insensitive matching
-        },
-      },
-      select: { phoneNumber: true, 
-
-        firstName:true,
-        closingBalance:true,
-        monthlyCharge:true,
-},
-    });
-
-    if (!activeCustomers || activeCustomers.length === 0) {
-      return res.status(404).json({
-        message: `No active customers found for tenant ${tenantId} in estate ${estateName}.`,
-      });
-    }
-
-    // Prepare SMS messages for the customers in the specified estate
-
-    const messages = activeCustomers.map((customer) => ({
-      mobile: sanitizePhoneNumber(customer.phoneNumber),
-   
-      message: `Dear ${customer.firstName},your bill is KES ${customer.monthlyCharge},balance ${
-        customer.closingBalance < 0
-          ? "overpayment of KES" + Math.abs(customer.closingBalance)
-          : "KES " + customer.closingBalance
-      }.Paybill: ${paybill},acct:your phone number.Inquiries? ${customerSupport}`
-
-
-    }));
-
-   
-    // Send SMS messages
-    const smsResponses = await sendSms(tenantId, messages);
-
-    // Respond with success message and SMS responses
-    res.status(200).json({
-      message: `Bills sent successfully to ${activeCustomers.length} customers in estate ${estateName}`,
-      smsResponses,
-    });
-  } catch (error) {
-    console.error(`Error sending bills for estate ${estateName}:`, error);
-    res.status(500).json({ error: `Failed to send bills for estate ${estateName}.` });
-  }
-};
 
 const sendToAll = async (req, res) => {
   const { tenantId } = req.user;
@@ -537,69 +605,6 @@ const sendToAll = async (req, res) => {
 
 
 
-const sendToEstate = async (req, res) => {
-  const { tenantId } = req.user;
-  const { estateName, message } = req.body;
-
-  // Validate request body
-  if (!message || typeof message !== 'string') {
-    return res.status(400).json({ error: 'Message is required and must be a string.' });
-  }
-  if (!estateName || typeof estateName !== 'string') {
-    return res.status(400).json({ error: 'Estate name is required and must be a string.' });
-  }
-
-  try {
-    // Check if SMS configuration exists for the tenant
-    const smsConfig = await prisma.sMSConfig.findUnique({
-      where: { tenantId },
-    });
-
-    if (!smsConfig) {
-      return res.status(400).json({ error: 'Missing SMS configuration for tenant.' });
-    }
-
-    // Fetch active customers for the specified estate (case-insensitive)
-    const activeCustomers = await prisma.customer.findMany({
-      where: {
-        tenantId,
-        status: 'ACTIVE',
-        estateName: {
-          equals: estateName,
-          mode: 'insensitive', // Case-insensitive matching
-        },
-      },
-      select: { phoneNumber: true },
-    });
-
-    if (activeCustomers.length === 0) {
-      return res.status(200).json({
-        message: `No active customers found in estate ${estateName} for tenant ${tenantId}.`,
-      });
-    }
-
-    // Prepare messages
-    const messages = activeCustomers.map((customer) => ({
-      mobile: sanitizePhoneNumber(customer.phoneNumber),
-      message,
-    }));
-
-    // Send SMS in batches to avoid timeouts (reusing your existing logic)
-    const smsResponses = await sendSms(tenantId, messages);
-
-    // Respond with success message
-    res.status(200).json({
-      message: `SMS sent to ${activeCustomers.length} active customers in estate ${estateName}.`,
-      smsResponses,
-    });
-  } catch (error) {
-    console.error(`Error sending SMS to customers in estate ${estateName}:`, error);
-    res.status(500).json({
-      error: `Failed to send SMS to customers in estate ${estateName}.`,
-      details: error.message,
-    });
-  }
-};
 
 // Send bill SMS for a specific customer
 const sendBill = async (req, res) => {
@@ -1372,7 +1377,7 @@ const sendUnpaidCustomers = async (req, res) => {
       const { tenantId } = req.user;
       const { balance } = req.body;
       const paybill = await getShortCode(tenantId);
-      const { phoneNumber: customerCarePhoneNumber } = await fetchTenant(tenantId);
+      const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
   
       if (!tenantId) throw new Error('Tenant ID is required');
       if (balance === undefined || isNaN(balance) || balance < 0) {
@@ -1383,7 +1388,7 @@ const sendUnpaidCustomers = async (req, res) => {
   
       const activeCustomers = await prisma.customer.findMany({
         where: { status: 'ACTIVE', tenantId },
-        select: { phoneNumber: true, firstName: true, closingBalance: true, monthlyCharge: true },
+        select: { phoneNumber: true, firstName: true, closingBalance: true},
       });
   
       const customersAboveBalance = activeCustomers.filter(
@@ -1393,7 +1398,7 @@ const sendUnpaidCustomers = async (req, res) => {
       const messages = customersAboveBalance.map((customer) => ({
         mobile: sanitizePhoneNumber(customer.phoneNumber),
 
-        message : `Dear ${customer.firstName},your bill is KES ${customer.monthlyCharge},balance KES ${customer.closingBalance}.Paybill:${paybill},acct: your phone number.Inquiries?:${customerCarePhoneNumber}`
+        message : `Dear ${customer.firstName},you have a pending balance  of KES ${customer.closingBalance}.Paybill:${paybill},acct: your phone number.Inquiries?:${customerSupport}. Pay now to avoid service disruption.`,
 
       }));
   
@@ -1419,149 +1424,6 @@ const sendUnpaidCustomers = async (req, res) => {
   
 
 
-  const sendLowBalanceCustomers = async (req, res) => {
-    try {
-      const { tenantId } = req.user;
-      const paybill = await getShortCode(tenantId);
-      const { customerSupportPhoneNumber } = await getSMSConfigForTenant(tenantId);
-  
-      if (!tenantId) {
-        return res.status(400).json({ message: 'Tenant ID is required.' });
-      }
-  
-      console.log(`Fetching low balance customers for tenant ID: ${tenantId}`);
-  
-      // Fetch active customers with low balance (0 <= closingBalance < monthlyCharge)
-      const lowBalanceCustomers = await prisma.customer.findMany({
-        where: {
-          status: 'ACTIVE',
-          tenantId: tenantId, // Filter by tenant ID
-          closingBalance: {
-            gte: 0, // Exclude negative balances (overpayments)
-            lt: prisma.customer.fields.monthlyCharge, // Less than monthlyCharge (not directly supported, see note)
-          },
-        },
-        select: {
-          phoneNumber: true,
-          firstName: true,
-          closingBalance: true,
-          monthlyCharge: true,
-        },
-      });
-  
-      // Note: Prisma doesn't support field comparison directly in 'where', so filter in memory for now
-      const filteredLowBalanceCustomers = lowBalanceCustomers.filter(
-        (customer) => customer.closingBalance < customer.monthlyCharge
-      );
-  
-      // Create SMS messages for low balance customers
-      const messages = filteredLowBalanceCustomers.map((customer) => ({
-        mobile: sanitizePhoneNumber(customer.phoneNumber),
-        message: `Dear ${customer.firstName}, your bill is KES ${customer.monthlyCharge}, balance KES ${customer.closingBalance}. Paybill: ${paybill}, acct: your phone number. Inquiries?: ${customerSupportPhoneNumber}`,
-      }));
-  
-      console.log(`Prepared ${messages.length} messages for low balance customers.`);
-  
-      // Check if there are messages to send
-      if (messages.length === 0) {
-        return res.status(404).json({ success: false, message: 'No low balance customers found.' });
-      }
-  
-      // Send bulk SMS
-      try {
-        await sendSms(tenantId, messages); // Send all messages in one API call
-        console.log('Bulk SMS sent successfully.');
-        res.status(200).json({
-          success: true,
-          message: 'SMS sent to low balance customers successfully.',
-          count: messages.length,
-        });
-      } catch (smsError) {
-        console.error('Failed to send bulk SMS:', smsError.message);
-        res.status(500).json({
-          success: false,
-          message: 'Failed to send SMS to low balance customers.',
-        });
-      }
-    } catch (error) {
-      console.error('Error in sendLowBalanceCustomers:', error.message);
-      res.status(500).json({
-        success: false,
-        message: error.message,
-      });
-    }
-  };
-  
-
-  const sendHighBalanceCustomers = async (req, res) => {
-    try {
-      const { tenantId } = req.user; // Extract tenant ID from req.user
-      const paybill = await getShortCode(tenantId);
-      const { customerSupportPhoneNumber } = await getSMSConfigForTenant(tenantId);
-    
-      if (!tenantId) {
-        return res.status(400).json({ message: 'Tenant ID is required.' });
-      }
-  
-      console.log(`Fetching high balance customers for tenant ID: ${tenantId}`);
-  
-      // Fetch active customers for the specific tenant
-      const activeCustomers = await prisma.customer.findMany({
-        where: {
-          status: 'ACTIVE',
-          tenantId: tenantId, // Filter by tenant ID
-        },
-        select: {
-          phoneNumber: true,
-          firstName: true,
-          closingBalance: true,
-          monthlyCharge: true,
-        },
-      });
-  
-      // Filter customers with high balances (balance > 1.5x monthly charge)
-      const highBalanceCustomers = activeCustomers.filter(
-        (customer) => customer.closingBalance > customer.monthlyCharge * 1.5
-      );
-  
-      // Prepare messages for high balance customers
-      const messages = highBalanceCustomers.map((customer) => ({
-        mobile: sanitizePhoneNumber(customer.phoneNumber),
-        message : `Dear ${customer.firstName},you have an outstanding balance of KES ${customer.closingBalance}.Paybill:${paybill},acct:your phone number.inquiries?:${customerSupportPhoneNumber}`,
-    
-      }));
-  
-    
-  
-      // Check if there are messages to send
-      if (messages.length === 0) {
-        return res.status(404).json({ success: false, message: 'No high balance customers found.' });
-      }
-  
-      // Send bulk SMS
-      try {
-        await sendSms(tenantId, messages); // Send all messages in one API call
-        console.log('Bulk SMS sent successfully.');
-        res.status(200).json({
-          success: true,
-          message: 'SMS sent to high balance customers successfully.',
-          count: messages.length,
-        });
-      } catch (smsError) {
-        console.error('Failed to send bulk SMS:', smsError.message);
-        res.status(500).json({
-          success: false,
-          message: 'Failed to send SMS to high balance customers.',
-        });
-      }
-    } catch (error) {
-      console.error('Error in sendHighBalanceCustomers:', error.message);
-      res.status(500).json({
-        success: false,
-        message: error.message,
-      });
-    }
-  };
   
 
       
@@ -1578,18 +1440,19 @@ module.exports = {
   sendBillPerLandlordOrBuilding,
   sendToGroup,
   sendSMS,
+  sendSms,
   sendToOne,
-  billReminderPerDay,
-  billReminderForAll,
-  harshBillReminder,
+
 
   checkSmsBalance,
   getSmsBalance,
   sendUnpaidCustomers,
 
-  sendLowBalanceCustomers,
-  sendBillsEstate,
-  sendToEstate,
 
-  sendHighBalanceCustomers,sendCustomersAboveBalance
+
+
+ sendCustomersAboveBalance,
+
+  sendCustomSmsAboveBalance,
+  getShortCode
 };

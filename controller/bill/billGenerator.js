@@ -1,9 +1,11 @@
-const { PrismaClient, InvoiceStatus,CustomerStatus } = require('@prisma/client');
+const { PrismaClient, InvoiceStatus,CustomerStatus , DepositStatus} = require('@prisma/client');
 const { json } = require('express');
 //const { GarbageCollectionDay } = require('./enum.js'); // Adjust the path if needed
 
 const schedule = require('node-schedule'); // For scheduling jobs
 const { getWaterBillingWithAveragesStatus, getBillingWithAveragesStatus } = require('./billingWithAveReadingHelperFn');
+const { getSMSConfigForTenant } = require('../smsConfig/getSMSConfig');
+const { getShortCode, sendSMS, sendSms } = require('../sms/sms');
 
 const prisma = new PrismaClient();
 
@@ -968,9 +970,13 @@ const generateInvoicesForAll = async (req, res) => {
 
 
 
+
+
+
+
 const createInitialInvoice = async (req, res) => {
   const { tenantId, user } = req.user;
-  const { customerId, invoiceItems: inputInvoiceItems = [] } = req.body;
+  const { customerId, invoiceItems: inputInvoiceItems = [], balanceThreshold = 0, customMessage = 'please make payment to complete your onboarding.' } = req.body;
 
   // Validate input
   if (!customerId) {
@@ -983,6 +989,18 @@ const createInitialInvoice = async (req, res) => {
     return res.status(400).json({
       success: false,
       message: 'At least one invoice item is required',
+    });
+  }
+  if (typeof balanceThreshold !== 'number' || balanceThreshold < 0) {
+    return res.status(400).json({
+      success: false,
+      message: 'Balance threshold must be a non-negative number.',
+    });
+  }
+  if (!customMessage || typeof customMessage !== 'string') {
+    return res.status(400).json({
+      success: false,
+      message: 'Custom message is required and must be a string.',
     });
   }
 
@@ -1010,13 +1028,27 @@ const createInitialInvoice = async (req, res) => {
       });
     }
 
-
-
-
-    // Validate customer
+    // Validate customer and fetch unit and building details
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
-      include: { unit: true },
+      select: {
+        id: true,
+        tenantId: true,
+        firstName: true,
+        phoneNumber: true,
+        closingBalance: true,
+        status: true,
+        unitId: true,
+        unit: {
+          select: {
+            id: true,
+            unitNumber: true,
+            building: {
+              select: { name: true },
+            },
+          },
+        },
+      },
     });
     if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({
@@ -1025,27 +1057,16 @@ const createInitialInvoice = async (req, res) => {
       });
     }
 
-    // Optional: Status validation (uncomment if needed)
-    /*
-    if (customer.status !== 'PENDING') {
+    // Check if customer is assigned to a unit and building
+    if (!customer.unitId || !customer.unit || !customer.unit.building) {
       return res.status(400).json({
         success: false,
-        message: 'Customer must be in PENDING status.',
+        message: 'Customer is not assigned to a unit or building.',
       });
     }
-    if (!customer.unitId || !customer.unit) {
-      return res.status(400).json({
-        success: false,
-        message: 'Customer is not assigned to a unit.',
-      });
-    }
-    if (customer.unit.status !== 'OCCUPIED_PENDING_PAYMENT') {
-      return res.status(400).json({
-        success: false,
-        message: 'Unit is not in OCCUPIED_PENDING_PAYMENT status.',
-      });
-    }
-    */
+
+    // Initialize previousClosingBalance
+    const previousClosingBalance = customer.closingBalance || 0;
 
     // Validate and prepare invoice items
     const invoiceItems = [];
@@ -1075,11 +1096,15 @@ const createInitialInvoice = async (req, res) => {
       0
     );
 
+    // Calculate new closing balance
+    const newClosingBalance = previousClosingBalance + invoiceAmount;
+
     // Generate unique invoice number
     const invoiceNumber = generateInvoiceNumber(customerId);
 
-
-
+    // Fetch SMS config and paybill for potential SMS
+    const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
+    const paybill = await getShortCode(tenantId);
 
     // Start a Prisma transaction
     const result = await prisma.$transaction(async (tx) => {
@@ -1093,7 +1118,7 @@ const createInitialInvoice = async (req, res) => {
           invoiceNumber,
           invoiceAmount,
           amountPaid: 0,
-          status: 'UNPAID',
+          status: InvoiceStatus.UNPAID, // Using InvoiceStatus enum
           closingBalance: invoiceAmount,
           isSystemGenerated: false,
           createdBy: currentUser.firstName + ' ' + currentUser.lastName,
@@ -1109,7 +1134,16 @@ const createInitialInvoice = async (req, res) => {
         },
       });
 
-   
+      // Update customer's closingBalance
+      const updatedCustomer = await tx.customer.update({
+        where: { id: customerId },
+        data: {
+          closingBalance: newClosingBalance, // Set to newClosingBalance
+        },
+        select: { closingBalance: true, firstName: true, phoneNumber: true },
+      });
+
+      // Create deposits
       const deposits = await Promise.all(
         invoiceItems.map((item) =>
           tx.deposit.create({
@@ -1118,15 +1152,16 @@ const createInitialInvoice = async (req, res) => {
               customerId,
               invoiceId: invoice.id,
               amount: item.amount * item.quantity,
-              status: 'ACTIVE',
+              status: DepositStatus.ACTIVE,
               createdAt: new Date(),
               updatedAt: new Date(),
             },
+            select: { id: true, tenantId: true, customerId: true, invoiceId: true, amount: true, status: true, createdAt: true, updatedAt: true },
           })
         )
       );
 
-      // Log user activity
+      // Log invoice creation activity
       const activity = await tx.userActivity.create({
         data: {
           userId: user,
@@ -1136,15 +1171,67 @@ const createInitialInvoice = async (req, res) => {
         },
       });
 
-      return { invoice, deposits, activity };
-    }, { timeout: 10000 }); // Increased timeout to 10 seconds
+      // Check if customer's updated closingBalance exceeds threshold and send SMS
+      let smsResponse = null;
+      if (updatedCustomer.closingBalance > balanceThreshold) {
+        const mobile = sanitizePhoneNumber(updatedCustomer.phoneNumber);
+        if (mobile) {
+          // Format billed items from invoiceItems
+          const itemsList = invoiceItems
+            .map((item) => `${item.description}: KES ${(item.amount * item.quantity).toFixed(2)}`)
+            .join(', ');
+          
+          const balanceText =
+            updatedCustomer.closingBalance < 0
+              ? `overpayment of KES ${Math.abs(updatedCustomer.closingBalance).toFixed(2)}`
+              : `KES ${updatedCustomer.closingBalance.toFixed(2)}`;
+          
+          const smsMessage = `Welcome to ${customer.unit.building.name}, we are glad to have you. Your account was created successfully. Billed items: ${itemsList}. Kindly Pay ${balanceText} to reserve unit ${customer.unit.unitNumber}. Paybill: ${paybill}, Acct: ${customer.phoneNumber}. Inquiries? ${customerSupport}`;
+
+          // Send SMS
+          smsResponse = await sendSms(tenantId, [{ mobile, message: smsMessage }]);
+
+          // Log SMS activity
+          await tx.userActivity.create({
+            data: {
+              userId: user,
+              tenantId,
+              action: `Sent custom SMS to customer ${customerId} for balance above ${balanceThreshold}`,
+              details: {
+                customerId,
+                balanceThreshold,
+                customMessage,
+                balance: updatedCustomer.closingBalance,
+                buildingName: customer.unit.building.name,
+                billedItems: itemsList,
+              },
+              timestamp: new Date(),
+            },
+          });
+        } else {
+          // Log error if no valid phone number
+          await tx.userActivity.create({
+            data: {
+              userId: user,
+              tenantId,
+              action: `Failed to send SMS to customer ${customerId}: No valid phone number`,
+              details: { customerId, balanceThreshold },
+              timestamp: new Date(),
+            },
+          });
+        }
+      }
+
+      return { invoice, deposits, activity, smsResponse };
+    }, { timeout: 10000 });
 
     return res.status(201).json({
       success: true,
-      message: 'Initial invoice created successfully',
+      message: 'Initial invoice created successfully' + (result.smsResponse ? ' and SMS sent.' : ''),
       data: {
         invoice: result.invoice,
         deposits: result.deposits,
+        smsResponse: result.smsResponse,
       },
     });
   } catch (error) {
@@ -1158,7 +1245,6 @@ const createInitialInvoice = async (req, res) => {
     await prisma.$disconnect();
   }
 };
-
 
 
 

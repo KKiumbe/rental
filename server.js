@@ -61,8 +61,8 @@ app.use(helmet());
 app.use(cors({
   origin: (origin, callback) => {
     const allowedOrigins = ['http://localhost:5173',
-      'http://173.249.50.194', // Frontend IP without trailing slash
-      'https://taqa.co.ke','http://taqa.co.ke', // Domain
+      'http://62.171.171.36', // Frontend IP without trailing slash
+      'https://rentke.co.ke','http://rentke.co.ke', // Domain
        // For local development (optional)
     ];
     if (!origin || allowedOrigins.includes(origin)) {
@@ -152,5 +152,5 @@ const server = app.listen(5000, '0.0.0.0', () => {
 // Set server timeout
 const timeoutDuration = 800000; // Set timeout duration in milliseconds (e.g., 60000 ms = 60 seconds)
 server.setTimeout(timeoutDuration, () => {
-  console.log(`Server timed out after ${timeoutDuration / 9000} seconds.`);
+  console.log(`Server timed out after ${timeoutDuration / 1000} seconds.`);
 });

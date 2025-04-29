@@ -123,7 +123,7 @@ const uploadCustomers = async (req, res) => {
                 if (!building) {
                   building = await prisma.building.create({
                     data: {
-                      tenantId,
+                      
                       landlord: { connect: { id: landlord.id } },
                       tenant: { connect: { id: tenantId } },
                       name: buildingName,

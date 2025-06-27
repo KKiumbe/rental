@@ -1,4 +1,4 @@
-const { PrismaClient, InvoiceStatus,CustomerStatus , DepositStatus} = require('@prisma/client');
+const { PrismaClient, InvoiceStatus } = require('@prisma/client');
 const { json } = require('express');
 //const { GarbageCollectionDay } = require('./enum.js'); // Adjust the path if needed
 
@@ -43,18 +43,7 @@ async function getCurrentMonthBill(customerId) {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-async function processCustomerBatchForAll(customers, currentMonth, year, userId) {
+async function processCustomerBatchForAll(customers, currentMonth, year) {
   const invoices = [];
   const invoiceItems = [];
   const customerUpdates = [];
@@ -631,674 +620,46 @@ const generateInvoicesForDay = async (day) => {
 
 
 
-const generateInvoicesForAll = async (req, res) => {
-  const { period } = req.body;
-  const currentUserFromAuth = req.user;
-  const tenantId = req.user?.tenantId;
-
-  if (!currentUserFromAuth || !tenantId) {
-    return res.status(401).json({ message: 'Unauthorized: User ID or Tenant ID missing.' });
-  }
-
-  try {
-    // Fetch the authenticated user from the database
-    const currentUser = await prisma.user.findUnique({
-      where: { id: currentUserFromAuth.user },
-      select: { firstName: true, lastName: true },
-    });
-
-    if (!currentUser) {
-      return res.status(404).json({ message: 'User not found.' });
-    }
-
-    const createdBy = currentUser.firstName;
-
-    // Validate request
-    if (!period) {
-      return res.status(400).json({ message: 'Missing required field: period is required.' });
-    }
-
-    // Parse period as YYYY-MM and set to 1st of the month
-    const periodRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
-    if (!periodRegex.test(period)) {
-      return res.status(400).json({ message: 'Invalid period format. Use YYYY-MM (e.g., 2025-04).' });
-    }
-
-    const [year, month] = period.split('-').map(Number);
-    const billingPeriod = new Date(year, month - 1, 1);
-    if (isNaN(billingPeriod.getTime())) {
-      return res.status(400).json({ message: 'Invalid period. Unable to parse date.' });
-    }
-
-    // Fetch all active customers for the tenant
-    const customers = await prisma.customer.findMany({
-      where: {
-        tenantId,
-        status: 'ACTIVE',
-      },
-      include: {
-        unit: {
-          include: {
-            building: true,
-          },
-        },
-      },
-    });
-
-    if (!customers.length) {
-      return res.status(404).json({ message: 'No active customers found for this tenant.' });
-    }
-
-    const results = [];
-    const errors = [];
-    const generatedCustomerIds = []; // Track customer IDs for UserActivity
-
-    // Process each customer
-    for (const customer of customers) {
-      try {
-        // Skip if customer is not assigned to a unit
-        if (!customer.unit) {
-          errors.push({ customerId: customer.id, message: 'Customer is not assigned to a unit.' });
-          continue;
-        }
-
-        // Generate a unique invoice number
-        let invoiceNumber;
-        let exists = true;
-        while (exists) {
-          const randomDigits = Math.floor(1000000 + Math.random() * 9000000);
-          invoiceNumber = `INV${randomDigits}`;
-          exists = await prisma.invoice.findUnique({
-            where: { invoiceNumber },
-          }) !== null;
-        }
-
-        // Get billing options for both water and gas
-        const { allowWaterBillingWithAverages, allowGasBillingWithAverages } = await getBillingWithAveragesStatus({
-          customerId: customer.id,
-          tenantId,
-        });
-
-        // Initialize charges
-        let waterCharge = 0;
-        let gasCharge = 0;
-        let serviceChargeValue = 0;
-        let garbageChargeValue = 0;
-        let securityCharge = 0;
-        let amenitiesCharge = 0;
-        let backupGeneratorCharge = 0;
-
-        const {
-          monthlyCharge: rent,
-          serviceCharge,
-          garbageCharge,
-          securityCharge: unitSecurityCharge,
-          amenitiesCharge: unitAmenitiesCharge,
-          backupGeneratorCharge: unitBackupGeneratorCharge,
-        } = customer.unit;
-        const {
-          waterRate,
-          gasRate,
-          billWater,
-          billGas,
-          billServiceCharge,
-          billGarbage,
-          billSecurity,
-          billAmenities,
-          billBackupGenerator,
-        } = customer.unit.building;
-
-        // Handle water billing if billWater is true
-        if (billWater) {
-          const waterConsumption = await prisma.waterConsumption.findFirst({
-            where: {
-              customerId: customer.id,
-              period: billingPeriod,
-              tenantId,
-            },
-          });
-
-          if (waterConsumption) {
-            waterCharge = waterConsumption.consumption * (waterRate || 0);
-          } else if (allowWaterBillingWithAverages) {
-            const pastWaterReadings = await prisma.waterConsumption.findMany({
-              where: {
-                customerId: customer.id, // Fixed typo: paymentProcessorcustomer.id
-                tenantId,
-                period: { lt: billingPeriod },
-              },
-              orderBy: { period: 'desc' },
-              take: 3,
-            });
-
-            if (pastWaterReadings.length > 0) {
-              const totalConsumption = pastWaterReadings.reduce((sum, reading) => sum + reading.consumption, 0);
-              const averageConsumption = totalConsumption / pastWaterReadings.length;
-              waterCharge = averageConsumption * (waterRate || 0);
-            }
-          }
-        }
-
-        // Handle gas billing if billGas is true
-        if (billGas) {
-          const gasConsumption = await prisma.gasConsumption.findFirst({
-            where: {
-              customerId: customer.id,
-              period: billingPeriod,
-              tenantId,
-            },
-          });
-
-          if (gasConsumption) {
-            gasCharge = gasConsumption.consumption * (gasRate || 0);
-          } else if (allowGasBillingWithAverages) {
-            const pastGasReadings = await prisma.gasConsumption.findMany({
-              where: {
-                customerId: customer.id,
-                tenantId,
-                period: { lt: billingPeriod },
-              },
-              orderBy: { period: 'desc' },
-              take: 3,
-            });
-
-            if (pastGasReadings.length > 0) {
-              const totalConsumption = pastGasReadings.reduce((sum, reading) => sum + reading.consumption, 0);
-              const averageConsumption = totalConsumption / pastGasReadings.length;
-              gasCharge = averageConsumption * (gasRate || 0);
-            }
-          }
-        }
-
-        // Handle other charges based on billing flags
-        if (billServiceCharge) {
-          serviceChargeValue = serviceCharge || 0;
-        }
-        if (billGarbage) {
-          garbageChargeValue = garbageCharge || 0;
-        }
-        if (billSecurity) {
-          securityCharge = unitSecurityCharge || 0;
-        }
-        if (billAmenities) {
-          amenitiesCharge = unitAmenitiesCharge || 0;
-        }
-        if (billBackupGenerator) {
-          backupGeneratorCharge = unitBackupGeneratorCharge || 0;
-        }
-
-        // Calculate total invoice amount
-        const invoiceAmount =
-          rent +
-          serviceChargeValue +
-          garbageChargeValue +
-          waterCharge +
-          gasCharge +
-          securityCharge +
-          amenitiesCharge +
-          backupGeneratorCharge;
-
-        // Determine invoice status and amount paid based on closing balance
-        const previousClosingBalance = customer.closingBalance || 0;
-        let status = 'UNPAID';
-        let amountPaid = 0;
-        let newClosingBalance = previousClosingBalance + invoiceAmount;
-
-        if (previousClosingBalance < 0) {
-          const availableCredit = Math.abs(previousClosingBalance);
-          if (availableCredit >= invoiceAmount) {
-            status = 'PAID';
-            amountPaid = invoiceAmount;
-            newClosingBalance = previousClosingBalance + invoiceAmount;
-          } else {
-            status = 'PPAID';
-            amountPaid = availableCredit;
-            newClosingBalance = previousClosingBalance + invoiceAmount;
-          }
-        }
-
-        // Create the invoice and its items in a transaction
-        const invoice = await prisma.$transaction(async (tx) => {
-          // Create invoice
-          const newInvoice = await tx.invoice.create({
-            data: {
-              tenantId,
-              customerId: customer.id,
-              unitId: customer.unit.id,
-              invoicePeriod: billingPeriod,
-              invoiceNumber,
-              invoiceAmount,
-              amountPaid,
-              status,
-              closingBalance: invoiceAmount - amountPaid,
-              isSystemGenerated: true,
-              createdBy,
-            },
-          });
-
-          // Define invoice items
-          const invoiceItems = [
-            { description: 'Rent', amount: rent, quantity: 1 },
-            ...(billServiceCharge && serviceChargeValue > 0
-              ? [{ description: 'Service Charge', amount: serviceChargeValue, quantity: 1 }]
-              : []),
-            ...(billGarbage && garbageChargeValue > 0
-              ? [{ description: 'Garbage', amount: garbageChargeValue, quantity: 1 }]
-              : []),
-            ...(billWater && waterCharge > 0
-              ? [{ description: 'Water', amount: waterCharge, quantity: 1 }]
-              : []),
-            ...(billGas && gasCharge > 0
-              ? [{ description: 'Gas', amount: gasCharge, quantity: 1 }]
-              : []),
-            ...(billSecurity && securityCharge > 0
-              ? [{ description: 'Security', amount: securityCharge, quantity: 1 }]
-              : []),
-            ...(billAmenities && amenitiesCharge > 0
-              ? [{ description: 'Amenities', amount: amenitiesCharge, quantity: 1 }]
-              : []),
-            ...(billBackupGenerator && backupGeneratorCharge > 0
-              ? [{ description: 'Backup Generator', amount: backupGeneratorCharge, quantity: 1 }]
-              : []),
-          ];
-
-          // Create invoice items
-          await tx.invoiceItem.createMany({
-            data: invoiceItems.map((item) => ({
-              invoiceId: newInvoice.id,
-              description: item.description,
-              amount: item.amount,
-              quantity: item.quantity,
-            })),
-          });
-
-          // Update customer closing balance
-          await tx.customer.update({
-            where: { id: customer.id },
-            data: { closingBalance: newClosingBalance },
-          });
-
-          return newInvoice;
-        }, { timeout: 20000 });
-
-        results.push({
-          customerId: customer.id,
-          invoiceId: invoice.id,
-          invoiceNumber,
-          totalAmount: invoiceAmount,
-          status,
-          amountPaid,
-          newClosingBalance,
-        });
-        generatedCustomerIds.push(customer.id); // Add customer ID to the list
-      } catch (error) {
-        errors.push({
-          customerId: customer.id,
-          message: error.message || 'Failed to generate invoice.',
-        });
-      }
-    }
-
-    // Log to UserActivity (single entry)
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: currentUserFromAuth.user } },
-        tenant: { connect: { id: tenantId } },
-        action: `Invoices generated for ${results.length} customers`,
-        details: {
-          customerIds: generatedCustomerIds,
-          period: period,
-        },
-        timestamp: new Date(),
-      },
-    });
-
-    res.status(200).json({
-      message: 'Invoice generation process completed.',
-      results,
-      errors,
-      totalProcessed: customers.length,
-      totalSuccess: results.length,
-      totalErrors: errors.length,
-    });
-  } catch (error) {
-    console.error('Error in generateInvoicesForAll:', error);
-    res.status(500).json({ error: 'Failed to process invoice generation.', details: error.message });
-  }
-};
 
 
-
-
-
-
-
-
-const createInitialInvoice = async (req, res) => {
-  const { tenantId, user } = req.user;
-  const { customerId, invoiceItems: inputInvoiceItems = [], balanceThreshold = 0, customMessage = 'please make payment to complete your onboarding.' } = req.body;
-
-  // Validate input
-  if (!customerId) {
-    return res.status(400).json({
-      success: false,
-      message: 'Required field: customerId',
-    });
-  }
-  if (inputInvoiceItems.length === 0) {
-    return res.status(400).json({
-      success: false,
-      message: 'At least one invoice item is required',
-    });
-  }
-  if (typeof balanceThreshold !== 'number' || balanceThreshold < 0) {
-    return res.status(400).json({
-      success: false,
-      message: 'Balance threshold must be a non-negative number.',
-    });
-  }
-  if (!customMessage || typeof customMessage !== 'string') {
-    return res.status(400).json({
-      success: false,
-      message: 'Custom message is required and must be a string.',
-    });
-  }
-
-  try {
-    // Validate tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
-    if (!tenant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Tenant not found.',
-      });
-    }
-
-    // Validate user
-    const currentUser = await prisma.user.findUnique({
-      where: { id: user },
-      select: { tenantId: true, firstName: true, lastName: true },
-    });
-    if (!currentUser || currentUser.tenantId !== tenantId) {
-      return res.status(404).json({
-        success: false,
-        message: 'Authenticated user not found or does not belong to tenant.',
-      });
-    }
-
-    // Validate customer and fetch unit and building details
-    const customer = await prisma.customer.findUnique({
-      where: { id: customerId },
-      select: {
-        id: true,
-        tenantId: true,
-        firstName: true,
-        phoneNumber: true,
-        closingBalance: true,
-        status: true,
-        unitId: true,
-        unit: {
-          select: {
-            id: true,
-            unitNumber: true,
-            building: {
-              select: { name: true },
-            },
-          },
-        },
-      },
-    });
-    if (!customer || customer.tenantId !== tenantId) {
-      return res.status(404).json({
-        success: false,
-        message: 'Customer not found or does not belong to tenant.',
-      });
-    }
-
-    // Check if customer is assigned to a unit and building
-    if (!customer.unitId || !customer.unit || !customer.unit.building) {
-      return res.status(400).json({
-        success: false,
-        message: 'Customer is not assigned to a unit or building.',
-      });
-    }
-
-    // Initialize previousClosingBalance
-    const previousClosingBalance = customer.closingBalance || 0;
-
-    // Validate and prepare invoice items
-    const invoiceItems = [];
-    for (const item of inputInvoiceItems) {
-      if (
-        !item.description ||
-        !Number.isFinite(item.amount) ||
-        item.amount <= 0 ||
-        !Number.isInteger(item.quantity) ||
-        item.quantity <= 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: 'Each invoice item must have a description, positive amount, and positive integer quantity.',
-        });
-      }
-      invoiceItems.push({
-        description: item.description,
-        amount: parseFloat(item.amount.toFixed(2)),
-        quantity: item.quantity,
-      });
-    }
-
-    // Calculate total invoice amount
-    const invoiceAmount = invoiceItems.reduce(
-      (sum, item) => sum + item.amount * item.quantity,
-      0
-    );
-
-    // Calculate new closing balance
-    const newClosingBalance = previousClosingBalance + invoiceAmount;
-
-    // Generate unique invoice number
-    const invoiceNumber = generateInvoiceNumber(customerId);
-
-    // Fetch SMS config and paybill for potential SMS
-    const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
-    const paybill = await getShortCode(tenantId);
-
-    // Start a Prisma transaction
-    const result = await prisma.$transaction(async (tx) => {
-      // Create invoice
-      const invoice = await tx.invoice.create({
-        data: {
-          tenantId,
-          customerId,
-          unitId: customer.unitId,
-          invoicePeriod: new Date(),
-          invoiceNumber,
-          invoiceAmount,
-          amountPaid: 0,
-          status: InvoiceStatus.UNPAID, // Using InvoiceStatus enum
-          closingBalance: invoiceAmount,
-          isSystemGenerated: false,
-          createdBy: currentUser.firstName + ' ' + currentUser.lastName,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-          InvoiceItem: {
-            create: invoiceItems.map((item) => ({
-              description: item.description,
-              amount: item.amount,
-              quantity: item.quantity,
-            })),
-          },
-        },
-      });
-
-      // Update customer's closingBalance
-      const updatedCustomer = await tx.customer.update({
-        where: { id: customerId },
-        data: {
-          closingBalance: newClosingBalance, // Set to newClosingBalance
-        },
-        select: { closingBalance: true, firstName: true, phoneNumber: true },
-      });
-
-      // Create deposits
-      const deposits = await Promise.all(
-        invoiceItems.map((item) =>
-          tx.deposit.create({
-            data: {
-              tenantId,
-              customerId,
-              invoiceId: invoice.id,
-              amount: item.amount * item.quantity,
-              status: DepositStatus.ACTIVE,
-              createdAt: new Date(),
-              updatedAt: new Date(),
-            },
-            select: { id: true, tenantId: true, customerId: true, invoiceId: true, amount: true, status: true, createdAt: true, updatedAt: true },
-          })
-        )
-      );
-
-      // Log invoice creation activity
-      const activity = await tx.userActivity.create({
-        data: {
-          userId: user,
-          tenantId,
-          action: `Created initial invoice ${invoice.invoiceNumber} for customer ${customerId} by ${currentUser.firstName} ${currentUser.lastName}`,
-          timestamp: new Date(),
-        },
-      });
-
-      // Check if customer's updated closingBalance exceeds threshold and send SMS
-      let smsResponse = null;
-      if (updatedCustomer.closingBalance > balanceThreshold) {
-        const mobile = sanitizePhoneNumber(updatedCustomer.phoneNumber);
-        if (mobile) {
-          // Format billed items from invoiceItems
-          const itemsList = invoiceItems
-            .map((item) => `${item.description}: KES ${(item.amount * item.quantity).toFixed(2)}`)
-            .join(', ');
-          
-          const balanceText =
-            updatedCustomer.closingBalance < 0
-              ? `overpayment of KES ${Math.abs(updatedCustomer.closingBalance).toFixed(2)}`
-              : `KES ${updatedCustomer.closingBalance.toFixed(2)}`;
-          
-          const smsMessage = `Welcome to ${customer.unit.building.name}, we are glad to have you. Your account was created successfully. Billed items: ${itemsList}. Kindly Pay ${balanceText} to reserve unit ${customer.unit.unitNumber}. Paybill: ${paybill}, Acct: ${customer.phoneNumber}. Inquiries? ${customerSupport}`;
-
-          // Send SMS
-          smsResponse = await sendSms(tenantId, [{ mobile, message: smsMessage }]);
-
-          // Log SMS activity
-          await tx.userActivity.create({
-            data: {
-              userId: user,
-              tenantId,
-              action: `Sent custom SMS to customer ${customerId} for balance above ${balanceThreshold}`,
-              details: {
-                customerId,
-                balanceThreshold,
-                customMessage,
-                balance: updatedCustomer.closingBalance,
-                buildingName: customer.unit.building.name,
-                billedItems: itemsList,
-              },
-              timestamp: new Date(),
-            },
-          });
-        } else {
-          // Log error if no valid phone number
-          await tx.userActivity.create({
-            data: {
-              userId: user,
-              tenantId,
-              action: `Failed to send SMS to customer ${customerId}: No valid phone number`,
-              details: { customerId, balanceThreshold },
-              timestamp: new Date(),
-            },
-          });
-        }
-      }
-
-      return { invoice, deposits, activity, smsResponse };
-    }, { timeout: 10000 });
-
-    return res.status(201).json({
-      success: true,
-      message: 'Initial invoice created successfully' + (result.smsResponse ? ' and SMS sent.' : ''),
-      data: {
-        invoice: result.invoice,
-        deposits: result.deposits,
-        smsResponse: result.smsResponse,
-      },
-    });
-  } catch (error) {
-    console.error('Error creating initial invoice:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-      error: error.message,
-    });
-  } finally {
-    await prisma.$disconnect();
-  }
-};
 
 
 
 const invoiceCreate = async (req, res) => {
+  const { customerId, isSystemGenerated = true } = req.body;
   const { tenantId, user } = req.user;
-  const {
-    customerId,
-    isSystemGenerated = true,
-    invoiceItems: inputInvoiceItems = [],
-  } = req.body;
+  console.log(`user is here ${JSON.stringify(req.user)}`);
 
   // Validate required fields
   if (!customerId) {
-    return res.status(400).json({
-      success: false,
-      message: 'Required field: customerId',
-    });
+    return res.status(400).json({ message: 'Required fields: customerId' });
   }
 
-  try {
-    // Validate tenant
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
-    if (!tenant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Tenant not found.',
-      });
-    }
+ 
 
-    // Validate user
-    const currentUser = await prisma.user.findUnique({
-      where: { id: user },
-      select: { tenantId: true, firstName: true, lastName: true },
-    });
-    if (!currentUser) {
-      return res.status(404).json({
-        success: false,
-        message: 'Authenticated user not found.',
+    try {
+      // Fetch user to get firstName and lastName
+      const currentUser = await prisma.user.findUnique({
+        where: { id: user },
+        select: { firstName: true, lastName: true},
       });
-    }
-    if (currentUser.tenantId !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        message: 'User does not belong to the specified tenant.',
-      });
-    }
+  
+      if (!currentUser) {
+        return res.status(404).json({ message: 'Authenticated user not found.' });
+      }
 
-    // Validate customer and fetch unit
+    // Set invoice period to first day of current month
+    const invoicePeriod = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+    // Check if customer exists and belongs to tenant
     const customer = await prisma.customer.findUnique({
-      where: { id: customerId },
-      include: { unit: { include: { building: true } } },
+      where: {
+        id: customerId,
+        tenantId: tenantId,
+      },
+      include: { building: true },
     });
+
     if (!customer || customer.tenantId !== tenantId) {
       return res.status(404).json({
         success: false,
@@ -1306,47 +667,30 @@ const invoiceCreate = async (req, res) => {
       });
     }
 
-    // Set invoice period to first day of previous month
-    const now = new Date();
-    const currentYear = now.getFullYear();
-    const currentMonth = now.getMonth();
-    const invoicePeriod = new Date(currentYear, currentMonth - 1, 1);
+    // Check if customer is assigned to a building
+    if (!customer.buildingId || !customer.building) {
+      return res.status(400).json({ message: 'Customer is not assigned to a building.' });
+    }
 
-    // Initialize invoice items
-    let invoiceItems = [];
+    // Check if gasRate and waterRate are defined
+    if (customer.building.gasRate === null || customer.building.waterRate === null) {
+      return res.status(400).json({ message: 'Gas rate or water rate not defined for this building.' });
+    }
 
-    // Use inputInvoiceItems exclusively if provided
-    if (inputInvoiceItems.length > 0) {
-      // Validate input invoice items
-      for (const item of inputInvoiceItems) {
-        if (!item.description || !Number.isFinite(item.amount) || item.amount <= 0 || !Number.isInteger(item.quantity) || item.quantity <= 0) {
-          return res.status(400).json({
-            success: false,
-            message: 'Each invoice item must have a description, positive amount, and positive integer quantity.',
-          });
-        }
-      }
-      invoiceItems = inputInvoiceItems.map(item => ({
-        description: item.description,
-        amount: parseFloat(item.amount.toFixed(2)),
-        quantity: item.quantity,
-      }));
-    } else if (customer.unitId) {
-      // Generate unit-related charges if no inputInvoiceItems and unit exists
-      const unit = customer.unit;
-      // Check building rates for consumption
-      if (unit.building.gasRate === null || unit.building.waterRate === null) {
-        return res.status(400).json({
-          success: false,
-          message: 'Gas rate or water rate not defined for this building.',
-        });
-      }
+    // // Check if invoice exists for this period
+    // const existingInvoice = await prisma.invoice.findFirst({
+    //   where: { customerId, invoicePeriod },
+    // });
 
-      // Fetch consumption records
-      const gasConsumption = await prisma.gasConsumption.findFirst({
-        where: { customerId, period: invoicePeriod },
-        orderBy: { period: 'desc' },
-      });
+    // if (existingInvoice) {
+    //   return res.status(400).json({ message: 'Invoice already exists for this customer and period.' });
+    // }
+
+    // Fetch latest consumption records
+    const gasConsumption = await prisma.gasConsumption.findFirst({
+      where: { customerId },
+      orderBy: { period: 'desc' }, // latest period first
+    });
 
       const waterConsumption = await prisma.waterConsumption.findFirst({
         where: { customerId, period: invoicePeriod },
@@ -1397,13 +741,7 @@ const invoiceCreate = async (req, res) => {
           quantity: parseInt(waterConsumption.consumption),
         });
       }
-    } else {
-      // Fail if no unitId and no inputInvoiceItems
-      return res.status(400).json({
-        success: false,
-        message: 'invoiceItems array is required when customer is not assigned to a unit.',
-      });
-    }
+    // The unmatched else block has been removed to fix the syntax error.
 
     // Calculate total invoice amount
     const invoiceAmount = invoiceItems.reduce((sum, item) => sum + item.amount * item.quantity, 0);

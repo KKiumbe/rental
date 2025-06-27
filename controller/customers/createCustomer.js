@@ -24,6 +24,15 @@ const createCustomer = async (req, res) => {
   }
 
 
+  // Validate status
+  const validStatuses = Object.values(CustomerStatus);
+  if (status && !validStatuses.includes(status)) {
+    return res.status(400).json({
+      success: false,
+      message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
+    });
+  }
+
 
   try {
     // Check if tenant exists
@@ -41,6 +50,9 @@ const createCustomer = async (req, res) => {
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
       select: { tenantId: true, firstName: true, lastName: true ,id:true},
+
+      select: { tenantId: true, firstName: true, lastName: true },
+
     });
     if (!currentUser) {
       return res.status(404).json({
@@ -118,6 +130,8 @@ const createCustomer = async (req, res) => {
         user: { connect: { id: currentUser.id } },
         tenant: { connect: { id: tenantId } },
         customer: { connect: { id: customer.id } }, // Link to the customer
+        user: { connect: { id: user } },
+        tenant: { connect: { id: tenantId } },
         action: `Added customer ${firstName} ${lastName} to unit ${unitId}`,
         timestamp: new Date(),
       },
@@ -199,6 +213,7 @@ const activateCustomer = async (req, res) => {
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
       select: { tenantId: true, firstName: true, lastName: true ,id:true},
+      select: { tenantId: true, firstName: true, lastName: true },
     });
     if (!currentUser || currentUser.tenantId !== tenantId) {
       return res.status(404).json({
@@ -230,12 +245,21 @@ const activateCustomer = async (req, res) => {
         message: 'Customer is not assigned to a unit.',
       });
     }
+
     // if (customer.unit.status !== UnitStatus.OCCUPIED_PENDING_PAYMENT) {
     //   return res.status(400).json({
     //     success: false,
     //     message: 'Unit is not in OCCUPIED_PENDING_PAYMENT status.',
     //   });
     // }
+
+    if (customer.unit.status !== UnitStatus.OCCUPIED_PENDING_PAYMENT) {
+      return res.status(400).json({
+        success: false,
+        message: 'Unit is not in OCCUPIED_PENDING_PAYMENT status.',
+      });
+    }
+
 
  
 
@@ -268,13 +292,13 @@ const activateCustomer = async (req, res) => {
 
     // Log user activity
     await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: currentUser.id } },
-        tenant: { connect: { id: tenantId } },
-        action: `Activated customer ${customerId} to ACTIVE status by ${currentUser.firstName} ${currentUser.lastName}`,
-        timestamp: new Date(),
-      },
-    });
+  data: {
+    user: { connect: { id: currentUser.id } },
+    tenant: { connect: { id: tenantId } },
+    action: `Activated customer ${customerId} to ACTIVE status by ${currentUser.firstName} ${currentUser.lastName}`,
+    timestamp: new Date(),
+  },
+});
 
     return res.status(200).json({
       success: true,
@@ -291,6 +315,7 @@ const activateCustomer = async (req, res) => {
     await prisma.$disconnect();
   }
 };
+
 async function getCustomerDeposits(req, res) {
   const { id:customerId } = req.params;
   const tenantId = req.user?.tenantId;
@@ -344,3 +369,9 @@ async function getCustomerDeposits(req, res) {
 
 
 module.exports = { createCustomer, activateCustomer,getCustomerDeposits };
+
+
+
+
+module.exports = { createCustomer, activateCustomer };
+

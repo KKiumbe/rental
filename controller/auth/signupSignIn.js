@@ -11,6 +11,7 @@ dotenv.config();
 
 
 const register = async (req, res) => {
+  
   const {
     firstName,
     lastName,
@@ -211,10 +212,8 @@ const signin = async (req, res) => {
     // Log the login action
     await prisma.userActivity.create({
       data: {
-        user: { connect: { id: user.id } },
-        tenant: { connect: { id: user.tenantId } },
-        action: `User ${user.firstName} ${user.lastName} logged in`,
-        timestamp: new Date(),
+        userId: user.id,
+        action: "LOGIN",
       },
     });
 

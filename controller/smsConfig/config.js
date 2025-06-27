@@ -14,7 +14,7 @@ const configureTenantSettings = async (tenantId) => {
   const tenantUpdateData = {
     subscriptionPlan: "Simba",
     monthlyCharge: 5000,
-   
+    status: "ACTIVE",
   };
 
   try {

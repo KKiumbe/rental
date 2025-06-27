@@ -43,7 +43,11 @@ const createLandlord = async (req, res) => {
     // Check if authenticated user exists and belongs to the tenant
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
+
       select: { firstName: true, lastName: true, tenantId: true ,id:true},
+
+      select: { firstName: true, lastName: true, tenantId: true },
+
     });
     if (!currentUser) {
       return res.status(404).json({
@@ -89,6 +93,7 @@ const createLandlord = async (req, res) => {
     });
 
 
+
     await prisma.userActivity.create({
       data: {
         user: { connect: { id: currentUser.id } },
@@ -98,6 +103,17 @@ const createLandlord = async (req, res) => {
         timestamp: new Date(),
       },
     });
+
+       // Create user activity log
+       await prisma.userActivity.create({
+        data: {
+          user: { connect: { id: user } }, // Connect user relation
+          tenant: { connect: { id: tenantId } }, // Connect tenant relation
+          action: `Added landlord ${firstName} ${lastName}`,
+          timestamp: new Date(),
+        },
+      });
+
 
     return res.status(201).json({
       success: true,
@@ -142,6 +158,116 @@ const createLandlord = async (req, res) => {
   }
 };
 
+
+const fetchAllLandlords = async (req, res) => {
+  const { tenantId, user } = req.user; // Extract from authenticated user (from verifyToken)
+
+  // Validate tenantId
+  if (!tenantId) {
+    return res.status(400).json({
+      success: false,
+      message: 'Tenant ID is required.',
+    });
+  }
+
+  try {
+    // Check if tenant exists
+    const tenant = await prisma.tenant.findUnique({
+      where: { id: tenantId },
+    });
+    if (!tenant) {
+      return res.status(404).json({
+        success: false,
+        message: 'Tenant not found.',
+      });
+    }
+
+    // Check if authenticated user exists and belongs to the tenant
+    const currentUser = await prisma.user.findUnique({
+      where: { id: user },
+      select: { firstName: true, lastName: true, tenantId: true },
+    });
+    if (!currentUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'Authenticated user not found.',
+      });
+    }
+    if (currentUser.tenantId !== tenantId) {
+      return res.status(403).json({
+        success: false,
+        message: 'User does not belong to the specified tenant.',
+      });
+    }
+
+    // Fetch all landlords for the tenant
+    const landlords = await prisma.landlord.findMany({
+      where: { tenantId },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phoneNumber: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        buildings: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            unitCount: true,
+            gasRate: true,
+            waterRate: true,
+            managementShare: true, // Include managementShare for revenue reporting
+          },
+        },
+      },
+    });
+
+    // Create user activity log
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: user } },
+        tenant: { connect: { id: tenantId } },
+        action: `Fetched all landlords for tenant ${tenant.name}`,
+        timestamp: new Date(),
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Landlords retrieved successfully',
+      data: landlords,
+    });
+  } catch (error) {
+    console.error('Error fetching landlords:', error);
+
+    // Handle Prisma validation error
+    if (error.name === 'PrismaClientValidationError') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid data provided for fetching landlords or user activity creation.',
+      });
+    }
+
+    // Handle relation errors
+    if (error.code === 'P2025') {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid tenant or user reference in user activity.',
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  } finally {
+    await prisma.$disconnect(); // Ensure Prisma client disconnects
+  }
+};
 
 
 const searchLandlords = async (req, res) => {

@@ -80,6 +80,7 @@ model Tenant {
   Building Building[]
 
   Landlord Landlord[]
+<<<<<<< HEAD
 
   UserActivity UserActivity[]
 
@@ -88,6 +89,8 @@ model Tenant {
   WaterConsumption WaterConsumption[]
 
   LeaseTermination LeaseTermination[]
+=======
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
 }
 
 
@@ -186,8 +189,11 @@ model User {
 model UserActivity {
   id          Int       @id @default(autoincrement())
   userId      Int
+<<<<<<< HEAD
   tenantId    Int
   customerId  String?   // Optional: Links to the customer affected by the action
+=======
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
   action      String    // e.g., 'LOGIN', 'LOGOUT', 'VIEW'
   timestamp   DateTime  @default(now())
 
@@ -349,10 +355,14 @@ enum LandlordStatus {
     @@index([email])
     @@index([status])
     Receipt Receipt[]
+<<<<<<< HEAD
       UserActivity UserActivity[]
     AuditLog AuditLog[]
     LeaseTermination LeaseTermination[]
 }
+=======
+  }
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
 
 
 // GasConsumption model
@@ -391,7 +401,6 @@ model WaterConsumption {
 enum CustomerStatus {
   ACTIVE
   INACTIVE
-  PENDING
 }
 
 // Invoice model for customer billing
@@ -417,8 +426,11 @@ model Invoice {
   payments              Payment[]
   InvoiceItem           InvoiceItem[]
   ReceiptInvoice        ReceiptInvoice[] @relation("InvoiceReceipts")
+<<<<<<< HEAD
 
   LeaseTermination LeaseTermination[] @relation("TerminationInvoices")
+=======
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
 }
 
 // InvoiceItem model

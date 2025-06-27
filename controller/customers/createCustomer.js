@@ -1,51 +1,63 @@
-const { PrismaClient, CustomerStatus, UnitStatus } = require('@prisma/client');
-
+const { PrismaClient, CustomerStatus } = require('@prisma/client');
 const prisma = new PrismaClient();
 
+
+
 const createCustomer = async (req, res) => {
-  const { tenantId, user } = req.user; // Extract tenantId and user ID
+  const { tenantId } = req.user;
   const {
-    unitId,
+    buildingId,
     firstName,
     lastName,
     email,
     phoneNumber,
     secondaryPhoneNumber,
-    nationalId,
-   
+    houseNumber,
+    monthlyCharge,
+    garbageCharge,
+    serviceCharge,
+    closingBalance,
+    status,
   } = req.body;
 
   // Validate required fields
-  if (!tenantId || !unitId || !firstName || !lastName || !phoneNumber) {
+  if (!tenantId || !buildingId || !firstName || !lastName || !phoneNumber || !monthlyCharge) {
     return res.status(400).json({
-      success: false,
-      message: 'Required fields: tenantId, unitId, firstName, lastName, phoneNumber.',
+      message: 'Required fields: tenantId, buildingId, firstName, lastName, phoneNumber, monthlyCharge.',
     });
   }
 
 
   // Validate status
-  const validStatuses = Object.values(CustomerStatus);
+  const validStatuses = ['ACTIVE', 'INACTIVE']; // Adjust based on CustomerStatus enum
   if (status && !validStatuses.includes(status)) {
     return res.status(400).json({
-      success: false,
       message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
     });
   }
 
+<<<<<<< HEAD
+=======
+  // Validate numeric fields
+  const numericFields = { monthlyCharge, garbageCharge, serviceCharge, closingBalance };
+  for (const [field, value] of Object.entries(numericFields)) {
+    if (value !== undefined && (isNaN(value) || value < 0)) {
+      return res.status(400).json({ message: `${field} must be a non-negative number.` });
+    }
+  }
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
 
   try {
     // Check if tenant exists
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
     });
+
     if (!tenant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Tenant not found.',
-      });
+      return res.status(404).json({ message: 'Tenant not found.' });
     }
 
+<<<<<<< HEAD
     // Check if authenticated user exists and belongs to the tenant
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
@@ -65,59 +77,51 @@ const createCustomer = async (req, res) => {
         success: false,
         message: 'User does not belong to the specified tenant.',
       });
+=======
+    // Check if authenticated user belongs to the tenant
+    if (req.user.tenantId !== tenantId) {
+      return res.status(403).json({ message: 'User does not belong to the specified tenant.' });
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
     }
 
-    // Check if unit exists, belongs to tenant, and is vacant
-    const unit = await prisma.unit.findUnique({
-      where: { id: unitId },
+    // Check if building exists and belongs to tenant
+    const building = await prisma.building.findUnique({
+      where: { id: buildingId },
     });
-    if (!unit || unit.tenantId !== tenantId) {
-      return res.status(404).json({
-        success: false,
-        message: 'Unit not found or does not belong to the tenant.',
-      });
-    }
-    if (unit.status !== 'VACANT') {
-      return res.status(400).json({
-        success: false,
-        message: 'Unit is not available (must be VACANT).',
-      });
+
+    if (!building || building.tenantId !== tenantId) {
+      return res.status(404).json({ message: 'Building not found or does not belong to tenant.' });
     }
 
-    // Check for duplicate phone number or national ID
-    const existingCustomer = await prisma.customer.findFirst({
-      where: {
-        tenantId,
-        OR: [
-          { phoneNumber },
-          nationalId ? { nationalId } : {},
-        ],
-      },
+    // Check if phone number already exists
+    const existingCustomer = await prisma.customer.findUnique({
+      where: { phoneNumber },
     });
-    if (existingCustomer) {
-      const conflictField = existingCustomer.phoneNumber === phoneNumber ? 'phone number' : 'national ID';
-      return res.status(400).json({
-        success: false,
-        message: `A customer with this ${conflictField} already exists for this tenant.`,
-      });
+
+    if (existingCustomer && existingCustomer.tenantId === tenantId) {
+      return res.status(400).json({ message: 'Phone number already exists for this tenant.' });
     }
 
     // Create customer
     const customer = await prisma.customer.create({
       data: {
         tenantId,
-        unitId,
+        buildingId,
         firstName,
         lastName,
-        email: email || null,
+        email,
         phoneNumber,
-        secondaryPhoneNumber: secondaryPhoneNumber || null,
-        nationalId: nationalId || null,
-        status:CustomerStatus.PENDING, // Default status
-        closingBalance: 0, // Default per schema
+        secondaryPhoneNumber,
+        houseNumber,
+        monthlyCharge: parseFloat(monthlyCharge),
+        garbageCharge: garbageCharge ? parseFloat(garbageCharge) : null,
+        serviceCharge: serviceCharge ? parseFloat(serviceCharge) : null,
+        status: status ?? 'ACTIVE',
+        closingBalance: closingBalance ? parseFloat(closingBalance) : 0,
       },
     });
 
+<<<<<<< HEAD
     // Update unit status to OCCUPIED
     await prisma.unit.update({
       where: { id: unitId },
@@ -142,45 +146,23 @@ const createCustomer = async (req, res) => {
       message: 'Customer created successfully',
       data: customer,
     });
+=======
+    res.status(201).json({ message: 'Customer created successfully', customer });
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
   } catch (error) {
     console.error('Error creating customer:', error);
 
     // Handle unique constraint violation
-    if (error.code === 'P2002') {
-      const target = error.meta?.target;
-      const field = target?.includes('phoneNumber') ? 'phone number' : 'national ID';
-      return res.status(400).json({
-        success: false,
-        message: `The ${field} must be unique.`,
-      });
+    if (error.code === 'P2002' && error.meta?.target.includes('phoneNumber')) {
+      return res.status(400).json({ message: 'Phone number must be unique.' });
     }
 
-    // Handle Prisma validation error
-    if (error.name === 'PrismaClientValidationError') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid data provided for customer creation.',
-      });
-    }
-
-    // Handle relation errors
-    if (error.code === 'P2025') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid tenant, user, or unit reference.',
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    });
-  } finally {
-    await prisma.$disconnect();
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
 
+<<<<<<< HEAD
 
 
 
@@ -375,3 +357,6 @@ module.exports = { createCustomer, activateCustomer,getCustomerDeposits };
 
 module.exports = { createCustomer, activateCustomer };
 
+=======
+module.exports = { createCustomer };
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")

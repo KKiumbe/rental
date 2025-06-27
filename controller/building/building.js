@@ -1,4 +1,4 @@
-const { PrismaClient, UnitStatus  } = require('@prisma/client');
+const { PrismaClient } = require('@prisma/client');
 const prisma = new PrismaClient();
 
 
@@ -316,7 +316,6 @@ const createBuilding = async (req, res) => {
         landlordId,
         name,
         address,
-        managementRate: managementRate ? parseFloat(managementRate) : null,
         unitCount: unitCount ? parseInt(unitCount) : null,
         gasRate: gasRate ? parseFloat(gasRate) : null,
         waterRate: waterRate ? parseFloat(waterRate) : null,

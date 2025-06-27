@@ -10,10 +10,13 @@ const router = express.Router();
 
 
 
+<<<<<<< HEAD
 
 
 router.post('/building', verifyToken ,createBuilding);
 
+=======
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
 router.get('/buildings/search', searchBuildings);
  
 

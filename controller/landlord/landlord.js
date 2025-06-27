@@ -1,31 +1,20 @@
-
 const { PrismaClient, LandlordStatus } = require('@prisma/client');
 const prisma = new PrismaClient();
 
-
-
-
-
-
 const createLandlord = async (req, res) => {
-  const { tenantId, user } = req.user; // Extract from authenticated user
+
+    const { tenantId } = req.user; // Extract tenantId from authenticated user
   const { firstName, lastName, email, phoneNumber, status } = req.body;
 
   // Validate required fields
   if (!tenantId || !firstName || !lastName || !phoneNumber) {
-    return res.status(400).json({
-      success: false,
-      message: 'Required fields: tenantId, firstName, lastName, phoneNumber.',
-    });
+    return res.status(400).json({ message: 'Required fields: tenantId, firstName, lastName, phoneNumber.' });
   }
 
   // Validate status
   const validStatuses = Object.values(LandlordStatus);
   if (status && !validStatuses.includes(status)) {
-    return res.status(400).json({
-      success: false,
-      message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
-    });
+    return res.status(400).json({ message: `Invalid status. Valid values: ${validStatuses.join(', ')}` });
   }
 
   try {
@@ -33,13 +22,12 @@ const createLandlord = async (req, res) => {
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
     });
+
     if (!tenant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Tenant not found.',
-      });
+      return res.status(404).json({ message: 'Tenant not found.' });
     }
 
+<<<<<<< HEAD
     // Check if authenticated user exists and belongs to the tenant
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
@@ -60,24 +48,23 @@ const createLandlord = async (req, res) => {
         success: false,
         message: 'User does not belong to the specified tenant.',
       });
+=======
+    // Check if authenticated user belongs to the tenant
+    if (req.user.tenantId !== tenantId) {
+      return res.status(403).json({ message: 'User does not belong to the specified tenant.' });
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
     }
 
-    // Check for duplicate phone number or email
+    // Check if phone number or email already exists
     const existingLandlord = await prisma.landlord.findFirst({
       where: {
+        OR: [{ phoneNumber }, { email: email ?? '' }],
         tenantId,
-        OR: [
-          { phoneNumber },
-          email ? { email } : {},
-        ],
       },
     });
+
     if (existingLandlord) {
-      const conflictField = existingLandlord.phoneNumber === phoneNumber ? 'phone number' : 'email';
-      return res.status(400).json({
-        success: false,
-        message: `A landlord with this ${conflictField} already exists for this tenant.`,
-      });
+      return res.status(400).json({ message: 'Phone number or email already exists for this tenant.' });
     }
 
     // Create landlord
@@ -86,12 +73,13 @@ const createLandlord = async (req, res) => {
         tenantId,
         firstName,
         lastName,
-        email: email || null,
+        email,
         phoneNumber,
-        status: status || 'ACTIVE',
+        status: status ?? 'ACTIVE',
       },
     });
 
+<<<<<<< HEAD
 
 
     await prisma.userActivity.create({
@@ -120,154 +108,21 @@ const createLandlord = async (req, res) => {
       message: 'Landlord created successfully',
       data: landlord,
     });
+=======
+    res.status(201).json({ message: 'Landlord created successfully', landlord });
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
   } catch (error) {
     console.error('Error creating landlord:', error);
 
     // Handle unique constraint violation
     if (error.code === 'P2002') {
-      const target = error.meta?.target;
-      const field = target?.includes('phoneNumber') ? 'phone number' : 'email';
-      return res.status(400).json({
-        success: false,
-        message: `The ${field} must be unique.`,
-      });
+      return res.status(400).json({ message: 'Phone number or email must be unique.' });
     }
 
-    // Handle Prisma validation error
-    if (error.name === 'PrismaClientValidationError') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid data provided for user activity creation.',
-      });
-    }
-
-    // Handle other Prisma errors (e.g., relation violations)
-    if (error.code === 'P2025') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid tenant or user reference in user activity.',
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    });
-  } finally {
-    await prisma.$disconnect(); // Ensure Prisma client disconnects
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
 
-
-const fetchAllLandlords = async (req, res) => {
-  const { tenantId, user } = req.user; // Extract from authenticated user (from verifyToken)
-
-  // Validate tenantId
-  if (!tenantId) {
-    return res.status(400).json({
-      success: false,
-      message: 'Tenant ID is required.',
-    });
-  }
-
-  try {
-    // Check if tenant exists
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
-    if (!tenant) {
-      return res.status(404).json({
-        success: false,
-        message: 'Tenant not found.',
-      });
-    }
-
-    // Check if authenticated user exists and belongs to the tenant
-    const currentUser = await prisma.user.findUnique({
-      where: { id: user },
-      select: { firstName: true, lastName: true, tenantId: true },
-    });
-    if (!currentUser) {
-      return res.status(404).json({
-        success: false,
-        message: 'Authenticated user not found.',
-      });
-    }
-    if (currentUser.tenantId !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        message: 'User does not belong to the specified tenant.',
-      });
-    }
-
-    // Fetch all landlords for the tenant
-    const landlords = await prisma.landlord.findMany({
-      where: { tenantId },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        phoneNumber: true,
-        status: true,
-        createdAt: true,
-        updatedAt: true,
-        buildings: {
-          select: {
-            id: true,
-            name: true,
-            address: true,
-            unitCount: true,
-            gasRate: true,
-            waterRate: true,
-            managementShare: true, // Include managementShare for revenue reporting
-          },
-        },
-      },
-    });
-
-    // Create user activity log
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: user } },
-        tenant: { connect: { id: tenantId } },
-        action: `Fetched all landlords for tenant ${tenant.name}`,
-        timestamp: new Date(),
-      },
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Landlords retrieved successfully',
-      data: landlords,
-    });
-  } catch (error) {
-    console.error('Error fetching landlords:', error);
-
-    // Handle Prisma validation error
-    if (error.name === 'PrismaClientValidationError') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid data provided for fetching landlords or user activity creation.',
-      });
-    }
-
-    // Handle relation errors
-    if (error.code === 'P2025') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid tenant or user reference in user activity.',
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    });
-  } finally {
-    await prisma.$disconnect(); // Ensure Prisma client disconnects
-  }
-};
 
 
 const searchLandlords = async (req, res) => {
@@ -352,6 +207,7 @@ const getBuildingsByLandlord = async (req, res) => {
   }
 };
 
+<<<<<<< HEAD
 
 
 const getAllLandlords = async (req, res) => {
@@ -443,6 +299,9 @@ const getLandlordById = async (req, res) => {
 
 
 module.exports = { getBuildingsByLandlord , createLandlord , searchLandlords ,getAllLandlords, getLandlordById };
+=======
+module.exports = { getBuildingsByLandlord , createLandlord , searchLandlords };
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
 
 
 

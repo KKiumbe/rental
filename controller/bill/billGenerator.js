@@ -47,62 +47,60 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
   const invoices = [];
   const invoiceItems = [];
   const customerUpdates = [];
-  const userActivities = [];
-  const invoicePeriod = new Date(year, currentMonth - 1, 1); // Previous month, aligning with invoiceCreate
+  const invoicePeriod = new Date(year, currentMonth, 1);
 
   for (const customer of customers) {
-    // Validate unit
-    if (!customer.unitId || !customer.unit) {
-      console.warn(`Skipping customer ${customer.id}: No unit assigned.`);
+    // Validate building
+    if (!customer.building || !customer.building.id) {
+      console.warn(`Skipping customer ${customer.id}: No building assigned.`);
       continue;
     }
 
-    // Validate building rates
-    if (customer.unit.building.gasRate === null || customer.unit.building.waterRate === null) {
+    // Validate rates
+    if (customer.building.gasRate === null || customer.building.waterRate === null) {
       console.warn(`Skipping customer ${customer.id}: Gas or water rate not defined.`);
       continue;
     }
 
-    // Optional: Check for existing invoice (commented out as in your code)
-    /*
-    const existingInvoice = await prisma.invoice.findFirst({
-      where: {
-        customerId: customer.id,
-        invoicePeriod,
-      },
-    });
-    if (existingInvoice) {
-      console.warn(`Skipping customer ${customer.id}: Invoice already exists for period ${invoicePeriod}.`);
-      continue;
-    }
-    */
+    // Check for existing invoice
+    // const existingInvoice = await prisma.invoice.findFirst({
+    //   where: {
+    //     customerId: customer.id,
+    //     invoicePeriod,
+    //   },
+    // });
+
+    // if (existingInvoice) {
+    //   console.warn(`Skipping customer ${customer.id}: Invoice already exists for period ${invoicePeriod}.`);
+    //   continue;
+    // }
 
     // Build invoice items
     const items = [];
 
     // Monthly Charge
-    if (customer.unit.monthlyCharge > 0) {
+    if (customer.monthlyCharge > 0) {
       items.push({
         description: 'Monthly Rent',
-        amount: parseFloat(customer.unit.monthlyCharge.toFixed(2)),
+        amount: parseFloat(customer.monthlyCharge.toFixed(2)),
         quantity: 1,
       });
     }
 
     // Garbage Charge
-    if (customer.unit.garbageCharge && customer.unit.garbageCharge > 0) {
+    if (customer.garbageCharge && customer.garbageCharge > 0) {
       items.push({
         description: 'Garbage Collection',
-        amount: parseFloat(customer.unit.garbageCharge.toFixed(2)),
+        amount: parseFloat(customer.garbageCharge.toFixed(2)),
         quantity: 1,
       });
     }
 
     // Service Charge
-    if (customer.unit.serviceCharge && customer.unit.serviceCharge > 0) {
+    if (customer.serviceCharge && customer.serviceCharge > 0) {
       items.push({
         description: 'Service Fee',
-        amount: parseFloat(customer.unit.serviceCharge.toFixed(2)),
+        amount: parseFloat(customer.serviceCharge.toFixed(2)),
         quantity: 1,
       });
     }
@@ -115,7 +113,7 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
     ) {
       items.push({
         description: `Gas Consumption (${customer.gasConsumption.consumption} cubic meters)`,
-        amount: parseFloat(customer.unit.building.gasRate.toFixed(2)),
+        amount: parseFloat(customer.building.gasRate.toFixed(2)),
         quantity: parseInt(customer.gasConsumption.consumption),
       });
     }
@@ -128,10 +126,13 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
     ) {
       items.push({
         description: `Water Consumption (${customer.waterConsumption.consumption} liters)`,
-        amount: parseFloat(customer.unit.building.waterRate.toFixed(2)),
+        amount: parseFloat(customer.building.waterRate.toFixed(2)),
         quantity: parseInt(customer.waterConsumption.consumption),
       });
     }
+
+    // Calculate invoice amount
+    const invoiceAmount = items.reduce((sum, item) => sum + item.amount * item.quantity, 0);
 
     // Skip if no items
     if (items.length === 0) {
@@ -139,12 +140,11 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
       continue;
     }
 
-    // Calculate invoice amount
-    const invoiceAmount = items.reduce((sum, item) => sum + item.amount * item.quantity, 0);
     const invoiceNumber = generateInvoiceNumber(customer.id);
     const currentClosingBalance = customer.closingBalance ?? 0;
     let newClosingBalance = currentClosingBalance + invoiceAmount;
     let status = InvoiceStatus.UNPAID;
+
     let amountPaid = 0;
 
     // Handle credits
@@ -155,7 +155,7 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
         amountPaid = invoiceAmount;
         newClosingBalance = currentClosingBalance + invoiceAmount;
       } else {
-        status = InvoiceStatus.PARTIALLY_PAID; // Fixed PPAID to PARTIALLY_PAID
+        status = InvoiceStatus.PPAID;
         amountPaid = availableCredit;
         newClosingBalance = currentClosingBalance + invoiceAmount;
       }
@@ -164,7 +164,6 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
     const invoice = {
       tenantId: customer.tenantId,
       customerId: customer.id,
-      unitId: customer.unitId,
       invoicePeriod,
       invoiceNumber,
       invoiceAmount: parseFloat(invoiceAmount.toFixed(2)),
@@ -190,13 +189,6 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
     customerUpdates.push({
       where: { id: customer.id },
       data: { closingBalance: parseFloat(newClosingBalance.toFixed(2)) },
-    });
-
-    userActivities.push({
-      userId,
-      tenantId: customer.tenantId,
-      action: `Created invoice ${invoiceNumber} for customer ${customer.id} by System`,
-      timestamp: new Date(),
     });
   }
 
@@ -231,26 +223,106 @@ async function processCustomerBatchForAll(customers, currentMonth, year) {
         // Bulk update customers
         await Promise.all(customerUpdates.map((update) => tx.customer.update(update)));
 
-        // Bulk create user activities
-        await tx.userActivity.createMany({
-          data: userActivities,
-        });
-
         return fetchedInvoices;
       },
-      { timeout: 30000 } // Increased timeout for large batches
+      { timeout: 20000 }
     );
 
     return result;
   } catch (error) {
-    console.error('Error in transaction (invoices, items, customers, user activities):', error);
+    console.error('Error in transaction (invoices, items, and customer updates):', error);
     throw error;
   }
 }
 
 
 
+async function generateInvoicesForAll(req, res) {
+  const { tenantId } = req.user;
+  const currentMonth = new Date().getMonth(); // 0-based for Date
+  const year = new Date().getFullYear();
 
+  try {
+    console.time('Find Customers');
+    const customers = await prisma.customer.findMany({
+      where: {
+        status: 'ACTIVE',
+        tenantId: tenantId,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        monthlyCharge: true,
+        garbageCharge: true,
+        serviceCharge: true,
+        closingBalance: true,
+        building: {
+          select: {
+            id: true,
+            gasRate: true,
+            waterRate: true,
+          },
+        },
+      },
+    });
+    console.timeEnd('Find Customers');
+    console.log(`Found ${customers.length} active customers for tenant ${tenantId}.`);
+
+    // Fetch latest consumption records for all customers
+    const customerIds = customers.map((c) => c.id);
+    const gasConsumptions = await prisma.gasConsumption.findMany({
+      where: {
+        customerId: { in: customerIds },
+      },
+      orderBy: { period: 'desc' },
+      select: {
+        customerId: true,
+        period: true,
+        consumption: true,
+      },
+    });
+
+    const waterConsumptions = await prisma.waterConsumption.findMany({
+      where: {
+        customerId: { in: customerIds },
+      },
+      orderBy: { period: 'desc' },
+      select: {
+        customerId: true,
+        period: true,
+        consumption: true,
+      },
+    });
+
+    // Map consumptions to customers
+    const customerData = customers.map((customer) => ({
+      ...customer,
+      gasConsumption: gasConsumptions.find(
+        (gc) => gc.customerId === customer.id
+      ),
+      waterConsumption: waterConsumptions.find(
+        (wc) => wc.customerId === customer.id
+      ),
+    }));
+
+    const allInvoices = await processCustomerBatchForAll(customerData, currentMonth, year);
+
+    console.log(`Generated ${allInvoices.length} invoices, added items, and updated customer balances for tenant ${tenantId}.`);
+
+    res.status(200).json({
+      success: true,
+      count: allInvoices.length,
+      invoices: allInvoices,
+    });
+  } catch (error) {
+    console.error(`Error generating invoices for tenant ${tenantId}:`, error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to generate invoices and update balances',
+    });
+    throw error;
+  }
+}
 
 
 
@@ -644,7 +716,11 @@ const invoiceCreate = async (req, res) => {
         select: { firstName: true, lastName: true},
       });
   
+<<<<<<< HEAD
       if (!currentUser) {
+=======
+      if (!user) {
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
         return res.status(404).json({ message: 'Authenticated user not found.' });
       }
 
@@ -661,10 +737,7 @@ const invoiceCreate = async (req, res) => {
     });
 
     if (!customer || customer.tenantId !== tenantId) {
-      return res.status(404).json({
-        success: false,
-        message: 'Customer not found or does not belong to tenant.',
-      });
+      return res.status(404).json({ message: 'Customer not found or does not belong to tenant.' });
     }
 
     // Check if customer is assigned to a building
@@ -692,91 +765,120 @@ const invoiceCreate = async (req, res) => {
       orderBy: { period: 'desc' }, // latest period first
     });
 
-      const waterConsumption = await prisma.waterConsumption.findFirst({
-        where: { customerId, period: invoicePeriod },
-        orderBy: { period: 'desc' },
+    const waterConsumption = await prisma.waterConsumption.findFirst({
+      where: { customerId },
+      orderBy: { period: 'desc' }, // latest period first
+    });
+
+    // Build invoice items
+    const invoiceItems = [];
+
+    // Rent (monthlyCharge)
+    if (customer.monthlyCharge > 0) {
+      invoiceItems.push({
+        description: 'Monthly Rent',
+        amount: parseFloat(customer.monthlyCharge.toFixed(2)),
+        quantity: 1,
       });
+    }
 
-      // Monthly Rent
-      if (unit.monthlyCharge > 0) {
-        invoiceItems.push({
-          description: 'Monthly Rent',
-          amount: parseFloat(unit.monthlyCharge.toFixed(2)),
-          quantity: 1,
-        });
-      }
+<<<<<<< HEAD
+    // Check if customer is assigned to a building
+    if (!customer.buildingId || !customer.building) {
+      return res.status(400).json({ message: 'Customer is not assigned to a building.' });
+    }
 
-      // Garbage Charge
-      if (unit.garbageCharge && unit.garbageCharge > 0) {
-        invoiceItems.push({
-          description: 'Garbage Collection',
-          amount: parseFloat(unit.garbageCharge.toFixed(2)),
-          quantity: 1,
-        });
-      }
+    // Check if gasRate and waterRate are defined
+    if (customer.building.gasRate === null || customer.building.waterRate === null) {
+      return res.status(400).json({ message: 'Gas rate or water rate not defined for this building.' });
+    }
 
-      // Service Charge
-      if (unit.serviceCharge && unit.serviceCharge > 0) {
-        invoiceItems.push({
-          description: 'Service Fee',
-          amount: parseFloat(unit.serviceCharge.toFixed(2)),
-          quantity: 1,
-        });
-      }
+    // // Check if invoice exists for this period
+    // const existingInvoice = await prisma.invoice.findFirst({
+    //   where: { customerId, invoicePeriod },
+    // });
 
-      // Gas Charge
-      if (gasConsumption && gasConsumption.consumption > 0) {
+    // if (existingInvoice) {
+    //   return res.status(400).json({ message: 'Invoice already exists for this customer and period.' });
+    // }
+
+    // Fetch latest consumption records
+    const gasConsumption = await prisma.gasConsumption.findFirst({
+      where: { customerId },
+      orderBy: { period: 'desc' }, // latest period first
+    });
+=======
+    // Garbage Charge
+    if (customer.garbageCharge && customer.garbageCharge > 0) {
+      invoiceItems.push({
+        description: 'Garbage Collection',
+        amount: parseFloat(customer.garbageCharge.toFixed(2)),
+        quantity: 1,
+      });
+    }
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
+
+    // Service Charge
+    if (customer.serviceCharge && customer.serviceCharge > 0) {
+      invoiceItems.push({
+        description: 'Service Fee',
+        amount: parseFloat(customer.serviceCharge.toFixed(2)),
+        quantity: 1,
+      });
+    }
+
+    // Gas Charge
+    if (gasConsumption && gasConsumption.consumption > 0) {
+      // Verify period match
+      if (gasConsumption.period.getTime() === invoicePeriod.getTime()) {
         invoiceItems.push({
           description: `Gas Consumption (${gasConsumption.consumption} cubic meters)`,
-          amount: parseFloat(unit.building.gasRate.toFixed(2)),
+          amount: parseFloat(customer.building.gasRate.toFixed(2)),
           quantity: parseInt(gasConsumption.consumption),
         });
       }
+    }
 
-      // Water Charge
-      if (waterConsumption && waterConsumption.consumption > 0) {
+    // Water Charge
+    if (waterConsumption && waterConsumption.consumption > 0) {
+      // Verify period match
+      if (waterConsumption.period.getTime() === invoicePeriod.getTime()) {
         invoiceItems.push({
           description: `Water Consumption (${waterConsumption.consumption} liters)`,
-          amount: parseFloat(unit.building.waterRate.toFixed(2)),
+          amount: parseFloat(customer.building.waterRate.toFixed(2)),
           quantity: parseInt(waterConsumption.consumption),
         });
       }
+<<<<<<< HEAD
     // The unmatched else block has been removed to fix the syntax error.
-
-    // Calculate total invoice amount
-    const invoiceAmount = invoiceItems.reduce((sum, item) => sum + item.amount * item.quantity, 0);
-    if (invoiceAmount <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: 'Invoice amount must be greater than zero.',
-      });
+=======
     }
+>>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
+
+    // Calculate invoice amount
+    const invoiceAmount = invoiceItems.reduce((sum, item) => sum + item.amount * item.quantity, 0);
 
     // Generate unique invoice number
     const invoiceNumber = generateInvoiceNumber(customerId);
 
     // Determine createdBy
-    const createdBy = isSystemGenerated
-      ? 'System'
-      : `${currentUser.firstName} ${currentUser.lastName}`;
+    const createdBy = isSystemGenerated ? 'System' : `${currentUser.firstName} ${currentUser.lastName}`;
+     const currentClosingBalance = await getCurrentClosingBalance(customerId);
+    const newClosingBalance = currentClosingBalance + invoiceAmount;
 
-    // Update customer's closing balance
-    const newClosingBalance = customer.closingBalance + invoiceAmount;
-
-    // Create invoice
+    // Create invoice with items
     const invoice = await prisma.invoice.create({
       data: {
         tenantId,
         customerId,
-        unitId: customer.unitId || null,
         invoicePeriod,
         invoiceNumber,
         invoiceAmount: parseFloat(invoiceAmount.toFixed(2)),
-        amountPaid: 0,
-        status: InvoiceStatus.UNPAID,
-        closingBalance: newClosingBalance,
         isSystemGenerated,
         createdBy,
+        status: InvoiceStatus.UNPAID,
+        amountPaid: 0,
+        closingBalance: newClosingBalance,
         InvoiceItem: {
           create: invoiceItems,
         },
@@ -786,66 +888,19 @@ const invoiceCreate = async (req, res) => {
       },
     });
 
-    // Update customer closing balance
+
     await prisma.customer.update({
       where: { id: customerId },
       data: { closingBalance: newClosingBalance },
     });
 
-    // Log user activity
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: user } },
-        tenant: { connect: { id: tenantId } },
-        action: `Created invoice ${invoiceNumber} for customer ${customerId} by ${createdBy}`,
-        timestamp: new Date(),
-      },
-    });
 
-    return res.status(201).json({
-      success: true,
-      message: 'Invoice created successfully',
-      data: invoice,
-    });
+    res.status(201).json({ message: 'Invoice created successfully', invoice });
   } catch (error) {
     console.error('Error creating invoice:', error);
-
-    // Handle unique constraint violation
-    if (error.code === 'P2002') {
-      const target = error.meta?.target;
-      if (target?.includes('invoiceNumber')) {
-        return res.status(400).json({
-          success: false,
-          message: 'Invoice number already exists.',
-        });
-      }
-    }
-
-    // Handle Prisma validation error
-    if (error.name === 'PrismaClientValidationError') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid data provided for invoice creation.',
-      });
-    }
-
-    // Handle relation errors
-    if (error.code === 'P2025') {
-      return res.status(400).json({
-        success: false,
-        message: 'Invalid tenant, customer, or user reference.',
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    });
-  } finally {
-    await prisma.$disconnect();
+    res.status(500).json({ message: 'Internal server error' });
   }
 };
-
 
 
 
@@ -1566,5 +1621,5 @@ module.exports = {
   generateInvoicesByDay,
   generateInvoicesPerTenant,searchInvoices,
   generateInvoicesForAll ,cancelCustomerInvoice,
-  invoiceCreate ,createInitialInvoice
+  invoiceCreate
 };

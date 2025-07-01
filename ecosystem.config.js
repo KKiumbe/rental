@@ -1,13 +1,14 @@
-
 module.exports = {
   apps: [{
     name: 'server',
-    script: './server.js', // Replace with your script name
-    instances: 'max', // Use all CPU cores, or specify a number (e.g., 4)
-    exec_mode: 'cluster', // Use cluster mode
+    script: './server.js',
+    instances: 'max',        // Or a specific number: 4, 8 etc
+    exec_mode: 'cluster',
+    watch: false,            // Turn on if you want auto-restart on file change (not for prod usually)
+    max_memory_restart: '500M',  // Optional: auto-restart if memory exceeds 500MB
     env: {
-      PORT: 5000, // All instances share port 5000
-      NODE_ENV: 'production'
+      NODE_ENV: 'production',
+      PORT: 5000
     }
   }]
 };

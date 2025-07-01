@@ -3,80 +3,192 @@ const { generatePDFHeader } = require('./header.js');
 const { PrismaClient } = require('@prisma/client');
 const PDFDocument = require('pdfkit');
 const dayjs = require('dayjs');
-
+const path = require('path');
 const prisma = new PrismaClient();
+const { promises: fsPromises } = require('fs');
 
-async function generateDormantCustomersReport(req, res) {
+
+
+
+async function getDormantCustomersReport(req, res) {
+  const tenantId = req.user?.tenantId;
+
+  if (!tenantId) {
+    return res.status(401).json({ message: 'Tenant not identified.' });
+  }
+
   try {
-    const tenantId = req.user.tenantId;
-    const tenant = await fetchTenant(tenantId);
+    // Log to verify tenantId
+    console.log(`Generating dormant customers report for tenantId: ${tenantId}`);
 
-    // Fetch inactive customers belonging to the tenant
-    const customers = await prisma.customer.findMany({
-      where: {
-        tenantId,
-        status: 'INACTIVE', // Fetch only inactive customers
+    // Fetch landlords with minimal required fields to reduce query load
+    const landlords = await prisma.landlord.findMany({
+      where: { tenantId, status: 'ACTIVE' },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        buildings: {
+          select: {
+            id: true,
+            name: true,
+            units: {
+              select: {
+                id: true,
+                monthlyCharge: true,
+                customers: {
+                  where: { status: 'INACTIVE' },
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    phoneNumber: true,
+                    email: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
-    if (customers.length === 0) {
-      return res.status(404).json({ success: false, message: 'No dormant customers found' });
+    if (!landlords.length) {
+      return res.status(404).json({ message: 'No active landlords found.' });
     }
 
-    // Create PDF Document
+    // Fetch tenant details (assumed to be lightweight)
+    const tenant = await fetchTenant(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ message: 'Tenant details not found.' });
+    }
+
+    // Construct and log the file path
+    const reportsDir = path.join(__dirname, '..', 'reports');
+    console.log('Reports directory:', reportsDir);
+
+    try {
+      await fsPromises.mkdir(reportsDir, { recursive: true });
+      console.log('Reports directory created or already exists');
+    } catch (err) {
+      console.error('Error creating reports directory:', err);
+      return res.status(500).json({ error: 'Failed to create reports directory' });
+    }
+
+    const filePath = path.join(reportsDir, 'dormantcustomersreport.pdf');
+    console.log('File Path:', filePath);
+
+    // Generate the PDF report
     const doc = new PDFDocument({ margin: 50 });
-    res.setHeader('Content-Disposition', 'attachment; filename="dormant_customers_report.pdf"');
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="dormantcustomersreport.pdf"');
+
     doc.pipe(res);
 
-    // Header
     generatePDFHeader(doc, tenant);
-    doc.fontSize(16).text('Dormant Customers Report', { align: 'center' });
-    doc.moveDown();
 
-    const columnWidths = [200, 120, 150, 150];
+    // Report title
+    doc.font('Helvetica').fontSize(12).text('Dormant Customers Report', { align: 'center' });
+    doc.moveDown(1);
+
+    // Table setup
+    const columnWidths = [100, 120, 100, 120, 100, 100]; // For First Name, Last Name, Phone, Email, Monthly Charge, Building Name
     const startX = 50;
 
     function drawTableRow(y, data, isHeader = false) {
-      const textOptions = isHeader ? { bold: true } : {};
       let x = startX;
-      
+      if (isHeader) {
+        doc.font('Helvetica-Bold').fontSize(8);
+      } else {
+        doc.font('Helvetica').fontSize(8);
+      }
       data.forEach((text, index) => {
-        doc.text(text, x + 5, y + 5, { width: columnWidths[index], ...textOptions });
+        doc.text(text, x + 5, y + 5, { width: columnWidths[index] });
         doc.rect(x, y, columnWidths[index], 25).stroke();
         x += columnWidths[index];
       });
     }
 
-    // Table Header
-    drawTableRow(doc.y, ['Customer Name', 'Phone Number', 'Email', 'Status'], true);
-    let rowY = doc.y + 30;
+    // Iterate through landlords
+    for (const landlord of landlords) {
+      const landlordName = `${landlord.firstName} ${landlord.lastName}`.trim();
+      doc.font('Helvetica-Bold').fontSize(10).text(`Landlord: ${landlordName}`, { align: 'left' });
+      doc.moveDown(0.5);
 
-    // Table Data
-    customers.forEach(customer => {
-      if (rowY > 700) { // Avoid page overflow
-        doc.addPage();
-        rowY = 50;
-        drawTableRow(rowY, ['Customer Name', 'Phone Number', 'Email', 'Status'], true);
-        rowY += 30;
+      // Collect dormant tenants
+      const tenants = landlord.buildings
+        .flatMap((building) =>
+          building.units.flatMap((unit) =>
+            unit.customers.map((customer) => ({
+              ...customer,
+              monthlyCharge: unit.monthlyCharge,
+              buildingName: building.name,
+            }))
+          )
+        );
+
+      if (!tenants.length) {
+        doc.font('Helvetica').fontSize(8).text('No dormant tenants for this landlord.', { align: 'left' });
+        doc.moveDown(1);
+        continue;
       }
 
-      drawTableRow(rowY, [
-        customer.firstName + ' ' + customer.lastName,
-        customer.phoneNumber || 'N/A',
-        customer.email || 'N/A',
-        customer.status,
-      ]);
+      // Draw table header
+      drawTableRow(
+        doc.y,
+        ['First Name', 'Last Name', 'Phone', 'Rent', 'Building Name'],
+        true
+      );
+      let rowY = doc.y + 30;
 
-      rowY += 30;
-    });
+      // Draw tenant rows
+      tenants.forEach((tenant) => {
+        if (rowY > 700) {
+          doc.addPage();
+          rowY = 50;
+          doc.font('Helvetica-Bold').fontSize(10).text(`Landlord: ${landlordName}`, { align: 'left' });
+          doc.moveDown(0.5);
+          drawTableRow(
+            doc.y,
+            ['First Name', 'Last Name', 'Phone', 'Monthly Charge', 'Building Name'],
+            true
+          );
+          rowY = doc.y + 30;
+        }
+
+        drawTableRow(rowY, [
+          tenant.firstName,
+          tenant.lastName,
+          tenant.phoneNumber || 'N/A',
+       
+          tenant.monthlyCharge ? `$${tenant.monthlyCharge.toFixed(2)}` : 'N/A',
+          tenant.buildingName || 'N/A',
+        ]);
+
+        rowY += 30;
+      });
+
+      doc.moveDown(1);
+    }
 
     // Finalize PDF
     doc.end();
   } catch (error) {
     console.error('Error generating dormant customers report:', error);
-    res.status(500).json({ success: false, message: 'Error generating report' });
+    return res.status(500).json({ error: 'Error generating report', details: error.message });
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
-module.exports = { generateDormantCustomersReport };
+
+
+
+
+
+
+
+module.exports = { getDormantCustomersReport };
+
+
+
+

@@ -4,6 +4,7 @@ const axios = require('axios');
 const {getSMSConfigForTenant }= require('../smsConfig/getSMSConfig.js')
 const {fetchTenant} = require('../tenants/tenantupdate.js')
 const { v4: uuidv4 } = require('uuid');
+const { generatePaymentLink } = require('../mpesa/stkpush.js');
 
 
 const prisma = new PrismaClient();
@@ -74,28 +75,35 @@ const sanitizePhoneNumber = (phone) => {
 
 
 
-const getSmsBalance = async (req,res) => {
+const getSmsBalance = async (req, res) => {
+  const { tenantId } = req.user;
+  let apikey, partnerID;
 
-    const { tenantId } = req.user; 
-    const { apikey,partnerID } = await getSMSConfigForTenant(tenantId);
-
+  try {
+    // Fetch SMS config
+    ({ apikey, partnerID } = await getSMSConfigForTenant(tenantId));
     console.log(`this is the api key ${apikey}`);
 
-  
-    try {
-      const response = await axios.post(SMS_BALANCE_URL, {
-        apikey: apikey,
-        partnerID: partnerID,
-      });
-      console.log('SMS balance:', response.data.credit);
+    // Make API call to get SMS balance
+    const response = await axios.post(SMS_BALANCE_URL, {
+      apikey: apikey,
+      partnerID: partnerID,
+    });
+    console.log('SMS balance:', response.data.credit);
 
-      res.status(200).json({ credit: response.data.credit });
-   
-    } catch (error) {
-      console.error('Error checking SMS balance:', error.response?.data || error.message);
-      throw new Error('Failed to retrieve SMS balance');
-    }
-  };
+    // Return successful response
+    return res.status(200).json({ credit: response.data.credit });
+  } catch (error) {
+    // Log the error for debugging
+    console.error('Error checking SMS balance:', error.response?.data || error.message);
+
+    // Return a controlled error response instead of throwing
+    return res.status(500).json({
+      error: 'Failed to retrieve SMS balance',
+      details: error.response?.data || error.message,
+    });
+  }
+};
   
 
 
@@ -229,165 +237,242 @@ const sendSMS = async (tenantId, mobile, message) => {
 
   
 
-  const sendBills = async (req, res) => {
-    const { tenantId, user } = req.user;
-    const { period } = req.body;
-  
-    try {
-      // Validate period
-      if (!period) {
-        return res.status(400).json({ message: 'Missing required field: period is required.' });
-      }
-  
-      // Validate period format (YYYY-MM)
-      const periodRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
-      if (!periodRegex.test(period)) {
-        return res.status(400).json({ message: 'Invalid period format. Use YYYY-MM (e.g., 2025-04).' });
-      }
-  
-      // Parse period to define the date range for the entire month
-      const [year, month] = period.split('-').map(Number);
-      const startOfMonth = new Date(year, month - 1, 1);
-      const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
-  
-      if (isNaN(startOfMonth.getTime()) || isNaN(endOfMonth.getTime())) {
-        return res.status(400).json({ message: 'Invalid period. Unable to parse date.' });
-      }
-  
-      // Validate that the period is in the current year (2025)
-      const currentYear = new Date().getFullYear(); // 2025
-      if (year !== currentYear) {
-        return res.status(400).json({ message: `Period must be in the current year (${currentYear}).` });
-      }
-  
-      // Convert month number to month name (e.g., 04 → "April")
-      const monthNames = [
-        'January', 'February', 'March', 'April', 'May', 'June',
-        'July', 'August', 'September', 'October', 'November', 'December'
-      ];
-      const monthName = monthNames[month - 1]; // month is 1-based (1-12), array is 0-based
-  
-      console.log(`Fetching invoices from ${startOfMonth} to ${endOfMonth} for ${monthName}`);
-  
-      // Fetch SMS config and paybill
-      const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
-      const paybill = await getShortCode(tenantId);
-  
-      // Fetch active customers with their invoices for the specified month
-      const activeCustomers = await prisma.customer.findMany({
-        where: {
-          status: 'ACTIVE',
-          tenantId,
-        },
-        select: {
-          id: true,
-          phoneNumber: true,
-          firstName: true,
-          closingBalance: true,
-          invoices: {
-            where: {
-              invoicePeriod: {
-                gte: startOfMonth,
-                lte: endOfMonth,
-              },
-              tenantId,
-            },
-            select: {
-              id: true,
-              invoiceAmount: true,
-              InvoiceItem: {
-                select: {
-                  description: true,
-                  amount: true,
-                },
-              },
-            },
-          },
-        },
-      });
-  
-      if (!activeCustomers.length) {
-        return res.status(404).json({ message: 'No active customers found for this tenant.' });
-      }
-  
-      const messages = [];
-      const errors = [];
-      const billedCustomerIds = [];
-  
-      // Process each customer
-      for (const customer of activeCustomers) {
-        // Skip if no invoice exists for the period
-        if (!customer.invoices.length) {
-          errors.push({
-            customerId: customer.id,
-            message: `No invoice found for period ${period}.`,
-          });
-          continue;
-        }
-  
-        // Use the first invoice (assuming one invoice per period per customer)
-        const invoice = customer.invoices[0];
-  
-        // Skip if no phone number
-        const mobile = sanitizePhoneNumber(customer.phoneNumber);
-        if (!mobile) {
-          errors.push({
-            customerId: customer.id,
-            message: 'No valid phone number available.',
-          });
-          continue;
-        }
-  
-        // Format billed items
-        const itemsList = invoice.InvoiceItem.map((item) =>
-          `${item.description}: KES ${item.amount.toFixed(2)}`
-        ).join(', ');
-        const totalAmount = invoice.invoiceAmount;
-  
-        // Construct SMS message using the month name
-        const message = `Dear ${customer.firstName}, your bill for ${monthName} is ${itemsList}. Total: KES ${totalAmount.toFixed(2)}. Balance: ${
-          customer.closingBalance < 0
-            ? 'overpayment of KES ' + Math.abs(customer.closingBalance)
-            : 'KES ' + customer.closingBalance
-        }. Paybill: ${paybill}, Acct: ${mobile}. Inquiries? ${customerSupport}`;
-  
-        messages.push({ mobile, message });
-        billedCustomerIds.push(customer.id);
-      }
-  
-      // Send SMS messages
-      const smsResponses = await sendSms(tenantId, messages);
-  
-      // Log to UserActivity (single entry)
-      await prisma.userActivity.create({
-        data: {
-          user: { connect: { id: user } },
-          tenant: { connect: { id: tenantId } },
-          action: `Bills sent to ${messages.length} customers`,
-          details: {
-            customerIds: billedCustomerIds,
-            period: period,
-          },
-          timestamp: new Date(),
-        },
-      });
-  
-      res.status(200).json({
-        message: 'Bills sent successfully',
-        smsResponses,
-        errors,
-        totalProcessed: activeCustomers.length,
-        totalMessagesSent: messages.length,
-        totalErrors: errors.length,
-      });
-    } catch (error) {
-      console.error('Error sending bills:', error);
-      res.status(500).json({ error: 'Failed to send bills.', details: error.message });
-    } finally {
-      await prisma.$disconnect();
-    }
-  };
+const sendBills = async (req, res) => {
+  const { tenantId, user } = req.user;
+  const { period } = req.body;
 
+  try {
+    // Validate inputs
+    if (!tenantId || !user) {
+      return res.status(401).json({ error: 'Unauthorized: Tenant ID or user not found.' });
+    }
+    if (!period) {
+      return res.status(400).json({ message: 'Missing required field: period is required.' });
+    }
+
+    // Validate period format (YYYY-MM)
+    const periodRegex = /^\d{4}-(0[1-9]|1[0-2])$/;
+    if (!periodRegex.test(period)) {
+      return res.status(400).json({ message: 'Invalid period format. Use YYYY-MM (e.g., 2025-04).' });
+    }
+
+    // Parse period
+    const [year, month] = period.split('-').map(Number);
+    const startOfMonth = new Date(year, month - 1, 1);
+    const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+
+    if (isNaN(startOfMonth.getTime()) || isNaN(endOfMonth.getTime())) {
+      return res.status(400).json({ message: 'Invalid period. Unable to parse date.' });
+    }
+
+    // Validate period is in the current year (2025)
+    const currentYear = new Date().getFullYear(); // 2025
+    if (year !== currentYear) {
+      return res.status(400).json({ message: `Period must be in the current year (${currentYear}).` });
+    }
+
+    // Convert month to name
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthName = monthNames[month - 1];
+
+    console.log(`Fetching invoices from ${startOfMonth} to ${endOfMonth} for ${monthName}`);
+
+    // Fetch configurations (no transaction)
+    const smsConfig = await prisma.sMSConfig.findUnique({
+      where: { tenantId },
+      select: { customerSupportPhoneNumber: true },
+    });
+    const mpesaConfig = await prisma.mPESAConfig.findFirst({
+      where: { tenantId },
+      select: { apiKey: true, passKey: true, secretKey: true },
+    });
+    const paybill = await getShortCode(tenantId);
+
+    if (!smsConfig) {
+      return res.status(400).json({ error: 'Missing SMS configuration for tenant.' });
+    }
+    const customerSupport = smsConfig.customerSupportPhoneNumber;
+
+    if (!mpesaConfig || !mpesaConfig.apiKey || !mpesaConfig.passKey || !mpesaConfig.secretKey) {
+      console.warn(`M-Pesa configuration incomplete for tenant ${tenantId}. Payment links will not be included.`);
+    }
+
+    // Fetch active customers with invoices
+    const activeCustomers = await prisma.customer.findMany({
+      where: {
+        status: 'ACTIVE',
+        tenantId,
+      },
+      select: {
+        id: true,
+        phoneNumber: true,
+        firstName: true,
+        closingBalance: true,
+        invoices: {
+          where: {
+            invoicePeriod: {
+              gte: startOfMonth,
+              lte: endOfMonth,
+            },
+            tenantId,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            invoiceAmount: true,
+            createdAt: true,
+            InvoiceItem: {
+              select: { description: true, amount: true },
+            },
+          },
+        },
+      },
+    });
+
+    if (!activeCustomers.length) {
+      return res.status(404).json({ message: 'No active customers found for this tenant.' });
+    }
+
+    // Marques: // Determine SMS encoding (for logging purposes only)
+    const isUCS2 = /[^\u0000-\u007F]/.test(
+      activeCustomers.map(c => `${c.firstName} ${c.invoices[0]?.InvoiceItem.map(i => i.description).join()}`).join()
+    );
+    console.log(`Using ${isUCS2 ? 'UCS-2' : 'GSM-7'} encoding (no length limit)`);
+
+    // Process customers with Promise.all (batched for concurrency control)
+    const messages = [];
+    const errors = [];
+    const billedCustomerIds = [];
+    const concurrencyLimit = 10; // Max concurrent generatePaymentLink calls
+
+    // Helper to process customers in chunks
+    const processCustomerChunk = async (customers) => {
+      const results = await Promise.all(
+        customers.map(async (customer) => {
+          try {
+            if (!customer.invoices.length) {
+              return { customerId: customer.id, error: `No invoice found for period ${period}.` };
+            }
+
+            const invoice = customer.invoices[0];
+            const mobile = sanitizePhoneNumber(customer.phoneNumber);
+            if (!mobile) {
+              return { customerId: customer.id, error: 'No valid phone number available.' };
+            }
+
+            // Generate payment link
+            let linkUrl = '';
+            if (mpesaConfig?.apiKey && mpesaConfig?.passKey && mpesaConfig?.secretKey) {
+              try {
+                linkUrl = await generatePaymentLink(customer.id, tenantId);
+              } catch (linkError) {
+                console.error(`Failed to generate payment link for customer ${customer.id}:`, linkError);
+                return { customerId: customer.id, error: 'Failed to generate payment link.' };
+              }
+            }
+
+            // Format billed items
+            const itemsList = invoice.InvoiceItem.length
+              ? invoice.InvoiceItem.map(item => `${item.description}: KES ${item.amount.toFixed(2)}`).join(', ')
+              : 'No items specified';
+            const totalAmount = invoice.invoiceAmount;
+
+            // Construct SMS message (no length limit)
+            const message = `Dear ${customer.firstName}, your bill for ${monthName} is ${itemsList}. Total: KES ${totalAmount.toFixed(2)}. Balance: ${
+              customer.closingBalance < 0
+                ? 'overpayment of KES ' + Math.abs(customer.closingBalance)
+                : 'KES ' + customer.closingBalance
+            }. Paybill: ${paybill}, Acct: ${mobile}. Pay now: ${linkUrl} Inquiries? ${customerSupport}`;
+
+            return { customerId: customer.id, mobile, message };
+          } catch (error) {
+            console.error(`Error processing customer ${customer.id}:`, error);
+            return { customerId: customer.id, error: error.message };
+          }
+        })
+      );
+      return results;
+    };
+
+    // Process customers in chunks to limit concurrency
+    for (let i = 0; i < activeCustomers.length; i += concurrencyLimit) {
+      const chunk = activeCustomers.slice(i, i + concurrencyLimit);
+      const chunkResults = await processCustomerChunk(chunk);
+
+      chunkResults.forEach(result => {
+        if (result.error) {
+          errors.push({ customerId: result.customerId, message: result.error });
+        } else {
+          messages.push({ mobile: result.mobile, message: result.message });
+          billedCustomerIds.push(result.customerId);
+        }
+      });
+    }
+
+    if (messages.length === 0) {
+      return res.status(400).json({
+        message: 'No bills sent due to missing invoices or valid phone numbers.',
+        errors,
+      });
+    }
+
+    // Send SMS in batches
+    const batchSize = 500;
+    const smsResponses = [];
+    for (let i = 0; i < messages.length; i += batchSize) {
+      const batch = messages.slice(i, i + batchSize);
+      try {
+        const batchResponses = await sendSms(tenantId, batch);
+        smsResponses.push(...batchResponses);
+      } catch (batchError) {
+        console.error(`Error sending batch ${i / batchSize + 1}:`, batchError);
+        smsResponses.push(
+          ...batch.map(msg => ({
+            phoneNumber: msg.mobile,
+            status: 'error',
+            details: batchError.message,
+          }))
+        );
+      }
+    }
+
+    // Log activity
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: user } },
+        tenant: { connect: { id: tenantId } },
+        action: `Bills sent to ${messages.length} customers`,
+        details: {
+          customerIds: billedCustomerIds,
+          period,
+          encoding: isUCS2 ? 'UCS-2' : 'GSM-7',
+        },
+        timestamp: new Date(),
+      },
+    });
+
+    res.status(200).json({
+      message: 'Bills sent successfully',
+      smsResponses,
+      errors,
+      totalProcessed: activeCustomers.length,
+      totalMessagesSent: messages.length,
+      totalErrors: errors.length,
+    });
+  } catch (error) {
+    console.error('Error sending bills:', {
+      tenantId,
+      period,
+      error: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({ error: 'Failed to send bills.', details: error.message });
+  }
+};
 
 
 
@@ -606,51 +691,130 @@ const sendToAll = async (req, res) => {
 
 
 
-// Send bill SMS for a specific customer
 const sendBill = async (req, res) => {
   const { customerId } = req.body;
-  const { tenantId } = req.user; 
-  const { customerSupportPhoneNumber } = await getSMSConfigForTenant(tenantId);
-  const paybill = await getShortCode(tenantId);
-  console.log(`this is the customer support number ${customerSupportPhoneNumber}`);
+  const { tenantId, user } = req.user;
 
   if (!customerId) {
-    return res.status(400).json({ error: 'Customer ID is required.' });
+    return res.status(400).json({ message: 'Customer ID is required.' });
   }
 
+  // Determine current period (YYYY-MM)
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // getMonth is zero-based
+
+  // Start and end of current month
+  const startOfMonth = new Date(year, month - 1, 1);
+  const endOfMonth = new Date(year, month, 0, 23, 59, 59, 999);
+
   try {
-    // Fetch the customer
+    const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
+    const paybill = await getShortCode(tenantId);
+
+    // Fetch customer + latest invoice this month
     const customer = await prisma.customer.findUnique({
-      where: { id: customerId,tenantId },
-      select: { phoneNumber: true,
-        firstName:true,
-        closingBalance:true,
-        monthlyCharge:true,
-       },
+      where: { id: customerId, tenantId },
+      select: {
+        firstName: true,
+        phoneNumber: true,
+        closingBalance: true,
+        invoices: {
+          where: {
+            invoicePeriod: {
+              gte: startOfMonth,
+              lte: endOfMonth,
+            },
+            tenantId,
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            invoiceAmount: true,
+            createdAt: true,
+            InvoiceItem: {
+              select: {
+                description: true,
+                amount: true,
+              },
+            },
+          },
+        },
+      },
     });
 
     if (!customer) {
-      return res.status(404).json({ error: 'Customer not found.' });
+      return res.status(404).json({ message: 'Customer not found.' });
     }
 
-   
 
-    const message = `Dear ${customer.firstName},your bill is KES ${customer.monthlyCharge},balance ${
+     // Check M-Pesa config for all required credentials
+    const mpesaConfig = await prisma.mPESAConfig.findFirst({
+      where: { tenantId },
+      select: { apiKey: true, passKey: true, secretKey: true },
+    });
+
+    // Generate payment link only if all credentials exist
+    let linkUrl = '';
+    if (mpesaConfig && mpesaConfig.apiKey && mpesaConfig.passKey && mpesaConfig.secretKey) {
+      linkUrl = await generatePaymentLink(customerId, tenantId);
+    }
+
+    const invoice = customer.invoices[0];
+    if (!invoice) {
+      return res.status(404).json({ message: `No invoice found for current period (${year}-${String(month).padStart(2, '0')}).` });
+    }
+
+    const mobile = sanitizePhoneNumber(customer.phoneNumber);
+    if (!mobile) {
+      return res.status(400).json({ message: 'No valid phone number available for this customer.' });
+    }
+
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ];
+    const monthName = monthNames[month - 1];
+
+    const itemsList = invoice.InvoiceItem.map(item => 
+      `${item.description}: KES ${item.amount.toFixed(2)}`
+    ).join(', ');
+
+    const message = `Dear ${customer.firstName}, your bill for ${monthName} is ${itemsList}. Total: KES ${invoice.invoiceAmount.toFixed(2)}. Balance: ${
       customer.closingBalance < 0
-        ? "overpayment of KES" + Math.abs(customer.closingBalance)
-        : "KES " + customer.closingBalance
-    }.Paybill: ${paybill},acct:your phone number.Inquiries? ${customerSupportPhoneNumber}`
+        ? 'overpayment of KES ' + Math.abs(customer.closingBalance)
+        : 'KES ' + customer.closingBalance
+    }. Paybill: ${paybill}, Acct: ${mobile}.Click link to pay ${linkUrl} Inquiries? ${customerSupport}`;
 
-    const smsResponses = await sendSMS(tenantId,
-       customer.phoneNumber, message
-    );
+    const smsResponses = await sendSMS(tenantId, mobile, message);
 
-    res.status(200).json({ message: 'Bill sent successfully.', smsResponses });
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: user } },
+        tenant: { connect: { id: tenantId } },
+        action: `Bill sent to customer ${customerId}`,
+        details: {
+          customerId,
+          period: `${year}-${String(month).padStart(2, '0')}`,
+          invoiceId: invoice.id
+        },
+        timestamp: new Date(),
+      },
+    });
+
+    res.status(200).json({
+      message: 'Bill sent successfully',
+      smsResponses
+    });
   } catch (error) {
     console.error('Error sending bill:', error);
     res.status(500).json({ error: 'Failed to send bill.', details: error.message });
+  } finally {
+    await prisma.$disconnect();
   }
 };
+
 
 
 // Send bill SMS for customers grouped by collection day
@@ -896,56 +1060,6 @@ const sendBillPerLandlordOrBuilding = async (req, res) => {
 
 
 
-const billReminderPerDay = async (req, res) => {
-  const { day } = req.body;
-  const { tenantId } = req.user; 
-  const { customerSupportPhoneNumber:customerSupport } = await getSMSConfigForTenant(tenantId);
-  const paybill = await getShortCode(tenantId);
-  if (!day) {
-    return res.status(400).json({ error: 'Day is required.' });
-  }
-
-  try {
-    // Fetch active customers with a closingBalance less than monthlyCharge for the specified day
-    const customers = await prisma.customer.findMany({
-      where: {
-        garbageCollectionDay: day.toUpperCase(),
-        status: 'ACTIVE',tenantId, // Ensure customer is active
-        closingBalance: { lt: prisma.customer.monthlyCharge }, // Check if closingBalance is less than monthlyCharge
-      },
-      select: { phoneNumber: true, 
-
-        firstName:true,
-        closingBalance:true,
-        monthlyCharge:true,
-},
-    });
-
-    if (customers.length === 0) {
-      return res.status(200).json({ message: 'No customers to notify for the given day.' });
-    }
-
-    // Prepare SMS messages
-    const messages = customers.map((customer) => ({
-      mobile: sanitizePhoneNumber(customer.phoneNumber),
-      message: `Dear ${customer.firstName},your bill is KES ${customer.monthlyCharge},balance ${
-        customer.closingBalance < 0
-          ? "overpayment of KES" + Math.abs(customer.closingBalance)
-          : "KES " + customer.closingBalance
-      }.Paybill: ${paybill},acct:your phone number.Inquiries? ${customerSupport}`
-
-    }));
-
-    // Send SMS using the sendSms service
-    const smsResponses = await sendSms(tenantId,messages);
-
-    // Respond with success message
-    res.status(200).json({ message: 'Bill reminders sent for the day successfully.', smsResponses });
-  } catch (error) {
-    console.error('Error sending bill reminder per day:', error);
-    res.status(500).json({ error: 'Failed to send bill reminders per day.' });
-  }
-};
 
 
 const billReminderForAll = async (req, res) => {
@@ -1232,17 +1346,33 @@ const sendUnpaidCustomers = async (req, res) => {
 
   try {
     // Input validation
-    if (!tenantId) {
-      return res.status(401).json({ success: false, message: 'Unauthorized: Tenant ID is required' });
+    if (!tenantId || !user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: Tenant ID or user not found.' });
     }
 
-    // Fetch SMS config and paybill
-    const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
+    // Fetch configurations
+    const smsConfig = await prisma.sMSConfig.findUnique({
+      where: { tenantId },
+      select: { customerSupportPhoneNumber: true },
+    });
+    const mpesaConfig = await prisma.mPESAConfig.findFirst({
+      where: { tenantId },
+      select: { apiKey: true, passKey: true, secretKey: true },
+    });
     const paybill = await getShortCode(tenantId);
+
+    if (!smsConfig) {
+      return res.status(400).json({ success: false, message: 'Missing SMS configuration for tenant.' });
+    }
+    const customerSupport = smsConfig.customerSupportPhoneNumber;
+
+    if (!mpesaConfig || !mpesaConfig.apiKey || !mpesaConfig.passKey || !mpesaConfig.secretKey) {
+      console.warn(`M-Pesa configuration incomplete for tenant ${tenantId}. Payment links will not be included.`);
+    }
 
     console.log(`Fetching unpaid customers for tenant ID: ${tenantId}`);
 
-    // Fetch all unpaid customers for the tenant
+    // Fetch unpaid customers
     const unpaidCustomers = await prisma.customer.findMany({
       where: {
         tenantId,
@@ -1260,25 +1390,19 @@ const sendUnpaidCustomers = async (req, res) => {
             tenantId,
             invoiceAmount: { gt: 0 },
           },
-          orderBy: {
-            invoicePeriod: 'desc',
-          },
+          orderBy: { invoicePeriod: 'desc' },
           take: 1,
           select: {
             id: true,
             invoiceAmount: true,
             InvoiceItem: {
-              select: {
-                description: true,
-                amount: true,
-              },
+              select: { description: true, amount: true },
             },
           },
         },
       },
     });
 
-    // Check if there are any unpaid customers
     if (unpaidCustomers.length === 0) {
       return res.status(404).json({
         success: false,
@@ -1286,45 +1410,76 @@ const sendUnpaidCustomers = async (req, res) => {
       });
     }
 
+    // Determine SMS encoding (for logging purposes)
+    const isUCS2 = /[^\u0000-\u007F]/.test(
+      unpaidCustomers.map(c => `${c.firstName} ${c.invoices[0]?.InvoiceItem.map(i => i.description).join()}`).join()
+    );
+    console.log(`Using ${isUCS2 ? 'UCS-2' : 'GSM-7'} encoding (no length limit)`);
+
+    // Process customers with Promise.all (batched for concurrency control)
     const messages = [];
     const errors = [];
     const messagedCustomerIds = [];
+    const concurrencyLimit = 10; // Max concurrent generatePaymentLink calls
 
-    // Process each unpaid customer
-    for (const customer of unpaidCustomers) {
-      // Skip if no unpaid invoice exists
-      if (!customer.invoices.length) {
-        errors.push({
-          customerId: customer.id,
-          message: 'No unpaid invoice found.',
-        });
-        continue;
-      }
+    // Helper to process customers in chunks
+    const processCustomerChunk = async (customers) => {
+      const results = await Promise.all(
+        customers.map(async (customer) => {
+          try {
+            if (!customer.invoices.length) {
+              return { customerId: customer.id, error: 'No unpaid invoice found.' };
+            }
 
-      // Use the most recent invoice
-      const invoice = customer.invoices[0];
+            const invoice = customer.invoices[0];
+            const mobile = sanitizePhoneNumber(customer.phoneNumber);
+            if (!mobile || !/^\+?\d{10,15}$/.test(mobile)) {
+              return { customerId: customer.id, error: 'No valid phone number available.' };
+            }
 
-      // Skip if no valid phone number
-      const mobile = sanitizePhoneNumber(customer.phoneNumber);
-      if (!mobile || !/^\+?\d{10,15}$/.test(mobile)) {
-        errors.push({
-          customerId: customer.id,
-          message: 'No valid phone number available.',
-        });
-        continue;
-      }
+            // Generate payment link
+            let linkUrl = '';
+            if (mpesaConfig?.apiKey && mpesaConfig?.passKey && mpesaConfig?.secretKey) {
+              try {
+                linkUrl = await generatePaymentLink(customer.id, tenantId);
+              } catch (linkError) {
+                console.error(`Failed to generate payment link for customer ${customer.id}:`, linkError);
+                return { customerId: customer.id, error: 'Failed to generate payment link.' };
+              }
+            }
 
-      // Format billed items
-      const itemsList = invoice.InvoiceItem.map((item) =>
-        `${item.description}: KES ${item.amount.toFixed(2)}`
-      ).join(', ');
-      const totalAmount = invoice.invoiceAmount;
+            // Format billed items
+            const itemsList = invoice.InvoiceItem.length
+              ? invoice.InvoiceItem.map(item => `${item.description}: KES ${item.amount.toFixed(2)}`).join(', ')
+              : 'No items specified';
+            const totalAmount = invoice.invoiceAmount;
 
-      // Construct SMS message (without period/month name)
-      const message = `Dear ${customer.firstName}, your outstanding bill is ${itemsList}. Total: KES ${totalAmount.toFixed(2)}. Balance: KES ${customer.closingBalance}. Paybill: ${paybill}, Acct: ${mobile}. Inquiries? ${customerSupport}`;
+            // Construct SMS message
+            const message = `Dear ${customer.firstName}, your outstanding bill is ${itemsList}. Total: KES ${totalAmount.toFixed(2)}. Balance: KES ${customer.closingBalance.toFixed(2)}. Paybill: ${paybill}, Acct: ${mobile}. Pay now: ${linkUrl} Inquiries? ${customerSupport}`;
 
-      messages.push({ mobile, message });
-      messagedCustomerIds.push(customer.id);
+            return { customerId: customer.id, mobile, message };
+          } catch (error) {
+            console.error(`Error processing customer ${customer.id}:`, error);
+            return { customerId: customer.id, error: error.message };
+          }
+        })
+      );
+      return results;
+    };
+
+    // Process customers in chunks
+    for (let i = 0; i < unpaidCustomers.length; i += concurrencyLimit) {
+      const chunk = unpaidCustomers.slice(i, i + concurrencyLimit);
+      const chunkResults = await processCustomerChunk(chunk);
+
+      chunkResults.forEach(result => {
+        if (result.error) {
+          errors.push({ customerId: result.customerId, message: result.error });
+        } else {
+          messages.push({ mobile: result.mobile, message: result.message });
+          messagedCustomerIds.push(result.customerId);
+        }
+      });
     }
 
     if (messages.length === 0) {
@@ -1335,17 +1490,35 @@ const sendUnpaidCustomers = async (req, res) => {
       });
     }
 
-    // Send SMS messages
-    const smsResponses = await sendSms(tenantId, messages);
+    // Send SMS in batches
+    const batchSize = 500;
+    const smsResponses = [];
+    for (let i = 0; i < messages.length; i += batchSize) {
+      const batch = messages.slice(i, i + batchSize);
+      try {
+        const batchResponses = await sendSms(tenantId, batch);
+        smsResponses.push(...batchResponses);
+      } catch (batchError) {
+        console.error(`Error sending batch ${i / batchSize + 1}:`, batchError);
+        smsResponses.push(
+          ...batch.map(msg => ({
+            phoneNumber: msg.mobile,
+            status: 'error',
+            details: batchError.message,
+          }))
+        );
+      }
+    }
 
-    // Log to UserActivity (single entry)
+    // Log to UserActivity
     await prisma.userActivity.create({
       data: {
         user: { connect: { id: user } },
         tenant: { connect: { id: tenantId } },
-        action: `Unpaid reminders sent to ${messages.length} customers for tenant ${tenantId}`,
+        action: `Unpaid reminders sent to ${messages.length} customers`,
         details: {
           customerIds: messagedCustomerIds,
+          encoding: isUCS2 ? 'UCS-2' : 'GSM-7',
         },
         timestamp: new Date(),
       },
@@ -1361,65 +1534,197 @@ const sendUnpaidCustomers = async (req, res) => {
       totalErrors: errors.length,
     });
   } catch (error) {
-    console.error('Error in sendUnpaidCustomers:', error);
+    console.error('Error in sendUnpaidCustomers:', {
+      tenantId,
+      error: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({
       success: false,
       message: 'Failed to send reminders to unpaid customers',
       details: error.message,
     });
-  } finally {
-    await prisma.$disconnect();
   }
 };
   
-  const sendCustomersAboveBalance = async (req, res) => {
-    try {
-      const { tenantId } = req.user;
-      const { balance } = req.body;
-      const paybill = await getShortCode(tenantId);
-      const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
-  
-      if (!tenantId) throw new Error('Tenant ID is required');
-      if (balance === undefined || isNaN(balance) || balance < 0) {
-        throw new Error('A valid balance amount is required');
-      }
-  
-      console.log(`Fetching customers above balance ${balance} for tenant ID: ${tenantId}`);
-  
-      const activeCustomers = await prisma.customer.findMany({
-        where: { status: 'ACTIVE', tenantId },
-        select: { phoneNumber: true, firstName: true, closingBalance: true},
-      });
-  
-      const customersAboveBalance = activeCustomers.filter(
-        (customer) => customer.closingBalance > balance
-      );
-  
-      const messages = customersAboveBalance.map((customer) => ({
-        mobile: sanitizePhoneNumber(customer.phoneNumber),
+const sendCustomersAboveBalance = async (req, res) => {
+  const { tenantId, user } = req.user;
+  const { balance } = req.body;
 
-        message : `Dear ${customer.firstName},you have a pending balance  of KES ${customer.closingBalance}.Paybill:${paybill},acct: your phone number.Inquiries?:${customerSupport}. Pay now to avoid service disruption.`,
-
-      }));
-  
-      console.log("📞 Prepared messages:", messages);
-  
-      if (messages.length === 0) {
-        return res.status(404).json({ success: false, message: `No customers found with balance above ${balance}.` });
-      }
-  
-      await sendSms(tenantId, messages);
-      console.log('SMS sent successfully.');
-      res.status(200).json({
-        success: true,
-        message: `SMS sent to customers with balance above ${balance} successfully.`,
-        count: messages.length,
-      });
-    } catch (error) {
-      console.error('Error in sendCustomersAboveBalance:', error.message);
-      res.status(500).json({ success: false, message: error.message });
+  try {
+    // Input validation
+    if (!tenantId || !user) {
+      throw new Error('Unauthorized: Tenant ID or user not found.');
     }
-  };
+    if (balance === undefined || isNaN(balance) || balance < 0) {
+      throw new Error('A valid balance amount is required');
+    }
+
+    // Fetch configurations
+    const smsConfig = await prisma.sMSConfig.findUnique({
+      where: { tenantId },
+      select: { customerSupportPhoneNumber: true },
+    });
+    const mpesaConfig = await prisma.mPESAConfig.findFirst({
+      where: { tenantId },
+      select: { apiKey: true, passKey: true, secretKey: true },
+    });
+    const paybill = await getShortCode(tenantId);
+
+    if (!smsConfig) {
+      throw new Error('Missing SMS configuration for tenant.');
+    }
+    const customerSupport = smsConfig.customerSupportPhoneNumber;
+
+    if (!mpesaConfig || !mpesaConfig.apiKey || !mpesaConfig.passKey || !mpesaConfig.secretKey) {
+      console.warn(`M-Pesa configuration incomplete for tenant ${tenantId}. Payment links will not be included.`);
+    }
+
+    console.log(`Fetching customers above balance ${balance} for tenant ID: ${tenantId}`);
+
+    // Fetch active customers
+    const activeCustomers = await prisma.customer.findMany({
+      where: { status: 'ACTIVE', tenantId },
+      select: { id: true, phoneNumber: true, firstName: true, closingBalance: true },
+    });
+
+    // Filter customers above balance
+    const customersAboveBalance = activeCustomers.filter(
+      (customer) => customer.closingBalance > balance
+    );
+
+    if (customersAboveBalance.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: `No customers found with balance above ${balance}.`,
+      });
+    }
+
+    // Determine SMS encoding (for logging purposes)
+    const isUCS2 = /[^\u0000-\u007F]/.test(customersAboveBalance.map(c => c.firstName).join());
+    console.log(`Using ${isUCS2 ? 'UCS-2' : 'GSM-7'} encoding (no length limit)`);
+
+    // Process customers with Promise.all (batched for concurrency control)
+    const messages = [];
+    const errors = [];
+    const messagedCustomerIds = [];
+    const concurrencyLimit = 10; // Max concurrent generatePaymentLink calls
+
+    // Helper to process customers in chunks
+    const processCustomerChunk = async (customers) => {
+      const results = await Promise.all(
+        customers.map(async (customer) => {
+          try {
+            const mobile = sanitizePhoneNumber(customer.phoneNumber);
+            if (!mobile || !/^\+?\d{10,15}$/.test(mobile)) {
+              return { customerId: customer.id, error: 'No valid phone number available.' };
+            }
+
+            // Generate payment link
+            let linkUrl = '';
+            if (mpesaConfig?.apiKey && mpesaConfig?.passKey && mpesaConfig?.secretKey) {
+              try {
+                linkUrl = await generatePaymentLink(customer.id, tenantId);
+              } catch (linkError) {
+                console.error(`Failed to generate payment link for customer ${customer.id}:`, linkError);
+                return { customerId: customer.id, error: 'Failed to generate payment link.' };
+              }
+            }
+
+            // Construct SMS message
+            const message = `Dear ${customer.firstName}, you have a pending balance of KES ${customer.closingBalance.toFixed(2)}. Paybill: ${paybill}, Acct: ${mobile}. Pay now: ${linkUrl} Inquiries? ${customerSupport}. Pay now to avoid service disruption.`;
+
+            return { customerId: customer.id, mobile, message };
+          } catch (error) {
+            console.error(`Error processing customer ${customer.id}:`, error);
+            return { customerId: customer.id, error: error.message };
+          }
+        })
+      );
+      return results;
+    };
+
+    // Process customers in chunks
+    for (let i = 0; i < customersAboveBalance.length; i += concurrencyLimit) {
+      const chunk = customersAboveBalance.slice(i, i + concurrencyLimit);
+      const chunkResults = await processCustomerChunk(chunk);
+
+      chunkResults.forEach(result => {
+        if (result.error) {
+          errors.push({ customerId: result.customerId, message: result.error });
+        } else {
+          messages.push({ mobile: result.mobile, message: result.message });
+          messagedCustomerIds.push(result.customerId);
+        }
+      });
+    }
+
+    if (messages.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'No customers with valid phone numbers found',
+        errors,
+      });
+    }
+
+    // Send SMS in batches
+    const batchSize = 500;
+    const smsResponses = [];
+    for (let i = 0; i < messages.length; i += batchSize) {
+      const batch = messages.slice(i, i + batchSize);
+      try {
+        const batchResponses = await sendSms(tenantId, batch);
+        smsResponses.push(...batchResponses);
+      } catch (batchError) {
+        console.error(`Error sending batch ${i / batchSize + 1}:`, batchError);
+        smsResponses.push(
+          ...batch.map(msg => ({
+            phoneNumber: msg.mobile,
+            status: 'error',
+            details: batchError.message,
+          }))
+        );
+      }
+    }
+
+    // Log to UserActivity
+    await prisma.userActivity.create({
+      data: {
+        user: { connect: { id: user } },
+        tenant: { connect: { id: tenantId } },
+        action: `Balance reminders sent to ${messages.length} customers above ${balance}`,
+        details: {
+          customerIds: messagedCustomerIds,
+          balanceThreshold: balance,
+          encoding: isUCS2 ? 'UCS-2' : 'GSM-7',
+        },
+        timestamp: new Date(),
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: `SMS sent to ${messages.length} customers with balance above ${balance} successfully`,
+      smsResponses,
+      errors,
+      totalProcessed: customersAboveBalance.length,
+      totalMessagesSent: messages.length,
+      totalErrors: errors.length,
+    });
+  } catch (error) {
+    console.error('Error in sendCustomersAboveBalance:', {
+      tenantId,
+      balance,
+      error: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({
+      success: false,
+      message: 'Failed to send reminders to customers above balance',
+      details: error.message,
+    });
+  }
+};
   
   
 

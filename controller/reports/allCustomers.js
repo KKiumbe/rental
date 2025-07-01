@@ -11,110 +11,133 @@ const { generatePDFHeader } = require('./header.js');
 
  
 
- 
- async function getAllActiveCustomersReport(req, res) {
-   const tenantId = req.user?.tenantId;
- 
-   if (!tenantId) {
-     return res.status(401).json({ message: "Tenant not identified." });
-   }
- 
-   try {
-     const customers = await prisma.customer.findMany({
-       where: { status: 'ACTIVE', tenantId },
-       select: {
-         firstName: true,
-         lastName: true,
-         phoneNumber: true,
-         email: true,
-         monthlyCharge: true,
-         closingBalance: true,
-         garbageCollectionDay: true,
-       }
-     });
- 
-     if (!customers.length) {
-       return res.status(404).json({ message: "No active customers found." });
-     }
- 
-     const tenant = await fetchTenant(tenantId);
-     if (!tenant) {
-       return res.status(404).json({ message: "Tenant details not found." });
-     }
- 
-     const reportsDir = path.join(__dirname, '..', 'reports');
-     await fsPromises.mkdir(reportsDir, { recursive: true });
- 
-     const filePath = path.join(reportsDir, 'activecustomersreport.pdf');
-     console.log('File Path:', filePath);
- 
-     // Generate the PDF report with reduced font size
-     const doc = new PDFDocument({ margin: 50 });
-     res.setHeader('Content-Type', 'application/pdf');
-     res.setHeader('Content-Disposition', 'attachment; filename="activecustomersreport.pdf"');
- 
-     doc.pipe(res);
 
-     generatePDFHeader(doc, tenant);
- 
-     // Header with reduced font size
-     doc.font('Helvetica').fontSize(12).text('Active Customers Report', { align: 'center' });
-     doc.moveDown(1);
- 
-     // Table Header
-     const columnWidths = [100, 120, 100, 120, 100, 100];
-     const startX = 50;
- 
-     function drawTableRow(y, data, isHeader = false) {
-       let x = startX;
- 
-       // Use reduced font size for headers and content
-       if (isHeader) {
-         doc.font('Helvetica-Bold').fontSize(8); // Header font size
-       } else {
-         doc.font('Helvetica').fontSize(8); // Content font size
-       }
- 
-       data.forEach((text, index) => {
-         doc.text(text, x + 5, y + 5, { width: columnWidths[index] });
-         doc.rect(x, y, columnWidths[index], 25).stroke();
-         x += columnWidths[index];
-       });
-     }
- 
-     // Drawing table rows with reduced font size for data
-     drawTableRow(doc.y, ['First Name', 'Last Name', 'Phone', 'Email', 'Monthly Charge', 'Closing Balance'], true);
-     let rowY = doc.y + 30;
- 
-     customers.forEach(customer => {
-       if (rowY > 700) { // Avoid page overflow
-         doc.addPage();
-         rowY = 50;
-         drawTableRow(rowY, ['First Name', 'Last Name', 'Phone', 'Email', 'Monthly Charge', 'Closing Balance'], true);
-         rowY += 30;
-       }
- 
-       drawTableRow(rowY, [
-         customer.firstName,
-         customer.lastName,
-         customer.phoneNumber || 'N/A',
-         customer.email || 'N/A',
-         `$${customer.monthlyCharge.toFixed(2)}`,
-         `$${customer.closingBalance.toFixed(2)}`,
-       ]);
- 
-       rowY += 30;
-     });
- 
-     // Finalize PDF
-     doc.end();
- 
-   } catch (error) {
-     console.error('Error fetching active customer report:', error);
-     res.status(500).json({ error: 'Error generating report' });
-   }
- }
- 
+
+
+
+async function getAllActiveCustomersReport(req, res) {
+  const tenantId = req.user?.tenantId;
+
+  if (!tenantId) {
+    return res.status(401).json({ message: "Tenant not identified." });
+  }
+
+  try {
+    const customers = await prisma.customer.findMany({
+      where: { status: 'ACTIVE', tenantId },
+      select: {
+        firstName: true,
+        lastName: true,
+        phoneNumber: true,
+      
+        closingBalance: true,
+        unit: {
+          select: {
+            monthlyCharge: true, // Fetch monthlyCharge from Unit
+            building: {
+              select: {
+                name: true, // Fetch building name
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!customers.length) {
+      return res.status(404).json({ message: "No active customers found." });
+    }
+
+    const tenant = await fetchTenant(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant details not found." });
+    }
+
+    const reportsDir = path.join(__dirname, '..', 'reports');
+    await fsPromises.mkdir(reportsDir, { recursive: true });
+
+    const filePath = path.join(reportsDir, 'activecustomersreport.pdf');
+    console.log('File Path:', filePath);
+
+    // Generate the PDF report with reduced font size
+    const doc = new PDFDocument({ margin: 50 });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="activecustomersreport.pdf"');
+
+    doc.pipe(res);
+
+    generatePDFHeader(doc, tenant);
+
+    // Header with reduced font size
+    doc.font('Helvetica').fontSize(12).text('Active Customers Report', { align: 'center' });
+    doc.moveDown(1);
+
+    // Table Header
+    const columnWidths = [100, 120, 100, 120, 100, 100]; // Adjusted for removed column
+    const startX = 50;
+
+    function drawTableRow(y, data, isHeader = false) {
+      let x = startX;
+
+      // Use reduced font size for headers and content
+      if (isHeader) {
+        doc.font('Helvetica-Bold').fontSize(8); // Header font size
+      } else {
+        doc.font('Helvetica').fontSize(8); // Content font size
+      }
+
+      data.forEach((text, index) => {
+        doc.text(text, x + 5, y + 5, { width: columnWidths[index] });
+        doc.rect(x, y, columnWidths[index], 25).stroke();
+        x += columnWidths[index];
+      });
+    }
+
+    // Drawing table rows with reduced font size for data
+    drawTableRow(
+      doc.y,
+      ['First Name', 'Last Name', 'Phone', 'Rent', 'Building Name'],
+      true
+    );
+    let rowY = doc.y + 30;
+
+    customers.forEach((customer) => {
+      if (rowY > 700) {
+        // Avoid page overflow
+        doc.addPage();
+        rowY = 50;
+        drawTableRow(
+          rowY,
+          ['First Name', 'Last Name', 'Phone', 'Rent', 'Building Name'],
+          true
+        );
+        rowY += 30;
+      }
+
+      drawTableRow(rowY, [
+        customer.firstName,
+        customer.lastName,
+        customer.phoneNumber || 'N/A',
+      
+        customer.unit ? `$${customer.unit.monthlyCharge.toFixed(2)}` : 'N/A', // Use unit.monthlyCharge
+        customer.unit?.building?.name || 'N/A', // Use building name
+      ]);
+
+      rowY += 30;
+    });
+
+    // Finalize PDF
+    doc.end();
+  } catch (error) {
+    console.error('Error fetching active customer report:', error);
+    res.status(500).json({ error: 'Error generating report' });
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+
+
 
  
 
@@ -189,107 +212,163 @@ async function generatePDF(customers, tenant, filePath) {
 
 
 
+async function getTenantsByLandlordReport(req, res) {
+  const tenantId = req.user?.tenantId;
 
+  if (!tenantId) {
+    return res.status(401).json({ message: "Tenant not identified." });
+  }
 
-
-async function generateGarbageCollectionReport(req, res) {
   try {
-    const tenantId = req.user.tenantId;
-    const tenant = await fetchTenant(tenantId);
-
-    // Fetch customers with garbage collection information
-    const customers = await prisma.customer.findMany({
-      where: {
-        tenantId,
+    // Fetch landlords with their buildings, units, and active customers
+    const landlords = await prisma.landlord.findMany({
+      where: { tenantId, status: 'ACTIVE' },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        
+        buildings: {
+          select: {
+            id: true,
+            name: true,
+            units: {
+              select: {
+                id: true,
+                monthlyCharge: true,
+                customers: {
+                  where: { status: 'ACTIVE' },
+                  select: {
+                    firstName: true,
+                    lastName: true,
+                    phoneNumber: true,
+                    closingBalance: true,
+                    email: true,
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     });
 
-    if (customers.length === 0) {
-      return res.status(404).json({ success: false, message: 'No customers found for garbage collection' });
+    if (!landlords.length) {
+      return res.status(404).json({ message: "No active landlords found." });
     }
 
-    // Group customers by collection day
-    const groupedByCollectionDay = customers.reduce((acc, customer) => {
-      const collectionDay = customer.garbageCollectionDay || 'Unknown';
+    const tenant = await fetchTenant(tenantId);
+    if (!tenant) {
+      return res.status(404).json({ message: "Tenant details not found." });
+    }
 
-      if (!acc[collectionDay]) {
-        acc[collectionDay] = [];
-      }
+    const reportsDir = path.join(__dirname, '..', 'reports');
+    await fsPromises.mkdir(reportsDir, { recursive: true });
 
-      acc[collectionDay].push(customer);
-      return acc;
-    }, {});
+    const filePath = path.join(reportsDir, 'tenantsbylandlordreport.pdf');
+    console.log('File Path:', filePath);
 
-    // Create PDF Document
+    // Generate the PDF report
     const doc = new PDFDocument({ margin: 50 });
-    res.setHeader('Content-Disposition', 'attachment; filename="garbage_collection_report.pdf"');
     res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="tenantsbylandlordreport.pdf"');
+
     doc.pipe(res);
 
-    // Header
     generatePDFHeader(doc, tenant);
-    doc.fontSize(12).font("Helvetica-Bold").text('Customers Per Collection Day', { align: 'center' });
-    doc.moveDown();
 
-    const columnWidths = [150, 120, 120, 150, 150, 100]; // Customize as needed
-    const startX = 10;
+    // Report title
+    doc.font('Helvetica').fontSize(12).text('Tenants by Landlord Report', { align: 'center' });
+    doc.moveDown(1);
+
+    // Table setup
+    const columnWidths = [80, 100, 80, 90,100, 100, 150]; // For First Name, Last Name, Phone, Email, Monthly Charge, Building Name
+    const startX = 50;
 
     function drawTableRow(y, data, isHeader = false) {
       let x = startX;
-
       if (isHeader) {
-        doc.font("Helvetica-Bold").fontSize(8); // Header font size
+        doc.font('Helvetica-Bold').fontSize(8);
       } else {
-        doc.font("Helvetica").fontSize(8); // Regular row font size
+        doc.font('Helvetica').fontSize(8);
       }
-
       data.forEach((text, index) => {
-        doc.text(text, x + 5, y + 5, { width: columnWidths[index], lineBreak: false });
+        doc.text(text, x + 5, y + 5, { width: columnWidths[index] });
         doc.rect(x, y, columnWidths[index], 25).stroke();
         x += columnWidths[index];
       });
     }
 
-    // Iterate over each collection day and create a section for it
-    Object.keys(groupedByCollectionDay).forEach(collectionDay => {
-      // Display the count of customers for this collection day
-      const customerCount = groupedByCollectionDay[collectionDay].length;
-      doc.fontSize(10).font("Helvetica").text(`Collection Day: ${collectionDay} (Total Customers: ${customerCount})`, { align: 'left' });
-      doc.moveDown();
+    // Iterate through landlords
+    for (const landlord of landlords) {
+      const landlordName = `${landlord.firstName} ${landlord.lastName}`.trim();
+      doc.font('Helvetica-Bold').fontSize(10).text(`Landlord: ${landlordName}`, { align: 'left' });
+      doc.moveDown(0.5);
 
-      // Table Header
-      drawTableRow(doc.y, ['Customer Name', 'Phone Number', 'Town', 'Location', 'Estate Name', 'Service Type'], true);
+      // Collect all tenants for this landlord
+      const tenants = landlord.buildings
+        .flatMap((building) =>
+          building.units.flatMap((unit) =>
+            unit.customers.map((customer) => ({
+              ...customer,
+              monthlyCharge: unit.monthlyCharge,
+              buildingName: building.name,
+            }))
+          )
+        );
+
+      if (!tenants.length) {
+        doc.font('Helvetica').fontSize(8).text('No active tenants for this landlord.', { align: 'left' });
+        doc.moveDown(1);
+        continue;
+      }
+
+      // Draw table header
+      drawTableRow(
+        doc.y,
+        ['First Name', 'Last Name', 'Phone', 'Rent','Balance', 'Building Name'],
+        true
+      );
       let rowY = doc.y + 30;
 
-      // Table Data for customers in this collection day group
-      groupedByCollectionDay[collectionDay].forEach(customer => {
-        if (rowY > 700) { // Avoid page overflow
+      // Draw tenant rows
+      tenants.forEach((tenant) => {
+        if (rowY > 700) {
           doc.addPage();
           rowY = 50;
-          drawTableRow(rowY, ['Customer Name', 'Phone Number', 'Town', 'Location', 'Estate Name', 'Service Type'], true);
-          rowY += 30;
+          doc.font('Helvetica-Bold').fontSize(10).text(`Landlord: ${landlordName}`, { align: 'left' });
+          doc.moveDown(0.5);
+          drawTableRow(
+            doc.y,
+            ['First Name', 'Last Name', 'Phone', 'Rent','Balance', 'Building Name'],
+            true
+          );
+          rowY = doc.y + 30;
         }
 
         drawTableRow(rowY, [
-          `${customer.firstName} ${customer.lastName}`,
-          customer.phoneNumber || 'N/A',
-          customer.town || 'N/A',
-          customer.location || 'N/A',
-          customer.estateName || 'N/A',
-          customer.garbageCollectionDay || 'N/A',
+          tenant.firstName,
+          tenant.lastName,
+          tenant.phoneNumber || 'N/A',
+        
+          tenant.monthlyCharge ? `$${tenant.monthlyCharge.toFixed(2)}` : 'N/A',
+          tenant.closingBalance ? `KSH ${tenant.closingBalance.toFixed(2)}` : 'N/A',
+          tenant.buildingName || 'N/A',
         ]);
 
         rowY += 30;
       });
 
-      doc.moveDown();
-    });
+      doc.moveDown(1);
+    }
 
     // Finalize PDF
     doc.end();
   } catch (error) {
-    console.error('Error generating garbage collection report:', error);
-    res.status(500).json({ success: false, message: 'Error generating report' });
+    console.error('Error generating tenants by landlord report:', error);
+    res.status(500).json({ error: 'Error generating report' });
+  } finally {
+    await prisma.$disconnect();
   }
 }
 
@@ -300,4 +379,12 @@ async function generateGarbageCollectionReport(req, res) {
 
 
 
-module.exports = { getAllActiveCustomersReport,generateGarbageCollectionReport };
+
+
+
+
+
+
+
+
+module.exports = { getAllActiveCustomersReport ,getTenantsByLandlordReport, generatePDF };

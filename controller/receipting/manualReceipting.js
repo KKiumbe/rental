@@ -59,6 +59,7 @@ const manualCashPayment = async (req, res) => {
           amount: totalAmount,
           tenantId,
           modeOfPayment,
+          customerId,
           transactionId: transactionId,
           receipted: true,
           createdAt: new Date(),
@@ -69,6 +70,7 @@ const manualCashPayment = async (req, res) => {
         data: {
           amount: totalAmount,
           tenantId,
+          customerId,
           modeOfPayment,
           transactionId: transactionId,
           receipted: true,

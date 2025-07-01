@@ -191,7 +191,7 @@ const getAllPayments = async (req, res) => {
               invoiceAmount : true,
             },
           },
-          Customer: {
+          customer: {
             select: {
               id: true,
               firstName: true,

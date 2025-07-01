@@ -119,8 +119,26 @@ const createMPESAConfig = async (req, res) => {
     }
   };
   
+  async function getTenantSettingSTK(tenantId) {
+  if (!tenantId) {
+    throw new Error('Tenant ID is required');
+  }
+
+  const mpesaConfig = await prisma.mPESAConfig.findUnique({
+    where: { tenantId },
+  });
+
+  if (!mpesaConfig) {
+    throw new Error(`No MPESA settings found for tenant ${tenantId}`);
+  }
+
+  // Only return the fields you need
+  const { shortCode, name, apiKey, passKey, secretKey } = mpesaConfig;
+  return { shortCode, name, apiKey, passKey, secretKey };
+}
+  
 
   
   module.exports = {
-    createMPESAConfig,updateMPESAConfig,getTenantSettings
+    createMPESAConfig,updateMPESAConfig,getTenantSettings,getTenantSettingSTK
   };

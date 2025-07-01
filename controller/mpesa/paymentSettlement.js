@@ -100,6 +100,7 @@ async function settleInvoice() {
                         createdAt: TransTime,
                         ref: BillRefNumber,
                         tenantId, // Associate payment with tenant
+
                     },
                 });
                 continue;
@@ -116,6 +117,7 @@ async function settleInvoice() {
                     receiptId: null,
                     ref: BillRefNumber,
                     tenantId, // Associate payment with tenant
+                    customerId: customer.id, // Associate payment with the customer
                 },
             });
 

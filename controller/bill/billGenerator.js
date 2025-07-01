@@ -633,17 +633,16 @@ const generateInvoicesForDay = async (day) => {
 
 const generateInvoicesForAll = async (req, res) => {
   const { period } = req.body;
-  const currentUserFromAuth = req.user;
-  const tenantId = req.user?.tenantId;
+  const { tenantId, user: userId } = req.user;
 
-  if (!currentUserFromAuth || !tenantId) {
+  if (!userId || !tenantId) {
     return res.status(401).json({ message: 'Unauthorized: User ID or Tenant ID missing.' });
   }
 
   try {
     // Fetch the authenticated user from the database
     const currentUser = await prisma.user.findUnique({
-      where: { id: currentUserFromAuth.user },
+      where: { id: userId },
       select: { firstName: true, lastName: true },
     });
 
@@ -670,11 +669,16 @@ const generateInvoicesForAll = async (req, res) => {
       return res.status(400).json({ message: 'Invalid period. Unable to parse date.' });
     }
 
-    // Fetch all active customers for the tenant
+    // Fetch all active customers for the tenant in FULL buildings
     const customers = await prisma.customer.findMany({
       where: {
         tenantId,
         status: 'ACTIVE',
+        unit: {
+          building: {
+            billType: 'FULL', // Only include customers in FULL buildings
+          },
+        },
       },
       include: {
         unit: {
@@ -686,181 +690,180 @@ const generateInvoicesForAll = async (req, res) => {
     });
 
     if (!customers.length) {
-      return res.status(404).json({ message: 'No active customers found for this tenant.' });
+      return res.status(404).json({ message: 'No active customers found in FULL buildings for this tenant.' });
     }
 
     const results = [];
     const errors = [];
     const generatedCustomerIds = []; // Track customer IDs for UserActivity
 
-    // Process each customer
-    for (const customer of customers) {
-      try {
-        // Skip if customer is not assigned to a unit
-        if (!customer.unit) {
-          errors.push({ customerId: customer.id, message: 'Customer is not assigned to a unit.' });
-          continue;
-        }
-
-        // Generate a unique invoice number
-        let invoiceNumber;
-        let exists = true;
-        while (exists) {
-          const randomDigits = Math.floor(1000000 + Math.random() * 9000000);
-          invoiceNumber = `INV${randomDigits}`;
-          exists = await prisma.invoice.findUnique({
-            where: { invoiceNumber },
-          }) !== null;
-        }
-
-        // Get billing options for both water and gas
-        const { allowWaterBillingWithAverages, allowGasBillingWithAverages } = await getBillingWithAveragesStatus({
-          customerId: customer.id,
-          tenantId,
-        });
-
-        // Initialize charges
-        let waterCharge = 0;
-        let gasCharge = 0;
-        let serviceChargeValue = 0;
-        let garbageChargeValue = 0;
-        let securityCharge = 0;
-        let amenitiesCharge = 0;
-        let backupGeneratorCharge = 0;
-
-        const {
-          monthlyCharge: rent,
-          serviceCharge,
-          garbageCharge,
-          securityCharge: unitSecurityCharge,
-          amenitiesCharge: unitAmenitiesCharge,
-          backupGeneratorCharge: unitBackupGeneratorCharge,
-        } = customer.unit;
-        const {
-          waterRate,
-          gasRate,
-          billWater,
-          billGas,
-          billServiceCharge,
-          billGarbage,
-          billSecurity,
-          billAmenities,
-          billBackupGenerator,
-        } = customer.unit.building;
-
-        // Handle water billing if billWater is true
-        if (billWater) {
-          const waterConsumption = await prisma.waterConsumption.findFirst({
-            where: {
-              customerId: customer.id,
-              period: billingPeriod,
-              tenantId,
-            },
-          });
-
-          if (waterConsumption) {
-            waterCharge = waterConsumption.consumption * (waterRate || 0);
-          } else if (allowWaterBillingWithAverages) {
-            const pastWaterReadings = await prisma.waterConsumption.findMany({
-              where: {
-                customerId: customer.id, // Fixed typo: paymentProcessorcustomer.id
-                tenantId,
-                period: { lt: billingPeriod },
-              },
-              orderBy: { period: 'desc' },
-              take: 3,
-            });
-
-            if (pastWaterReadings.length > 0) {
-              const totalConsumption = pastWaterReadings.reduce((sum, reading) => sum + reading.consumption, 0);
-              const averageConsumption = totalConsumption / pastWaterReadings.length;
-              waterCharge = averageConsumption * (waterRate || 0);
-            }
+    // Process each customer concurrently using Promise.all
+    await Promise.all(
+      customers.map(async (customer) => {
+        try {
+          // Skip if customer is not assigned to a unit (redundant but kept for safety)
+          if (!customer.unit) {
+            errors.push({ customerId: customer.id, message: 'Customer is not assigned to a unit.' });
+            return;
           }
-        }
 
-        // Handle gas billing if billGas is true
-        if (billGas) {
-          const gasConsumption = await prisma.gasConsumption.findFirst({
-            where: {
-              customerId: customer.id,
-              period: billingPeriod,
-              tenantId,
-            },
+          // Generate a unique invoice number
+          let invoiceNumber;
+          let exists = true;
+          while (exists) {
+            const randomDigits = Math.floor(1000000 + Math.random() * 9000000);
+            invoiceNumber = `INV${randomDigits}`;
+            exists = (await prisma.invoice.findUnique({
+              where: { invoiceNumber },
+            })) !== null;
+          }
+
+          // Get billing options for both water and gas
+          const { allowWaterBillingWithAverages, allowGasBillingWithAverages } = await getBillingWithAveragesStatus({
+            customerId: customer.id,
+            tenantId,
           });
 
-          if (gasConsumption) {
-            gasCharge = gasConsumption.consumption * (gasRate || 0);
-          } else if (allowGasBillingWithAverages) {
-            const pastGasReadings = await prisma.gasConsumption.findMany({
+          // Initialize charges
+          let waterCharge = 0;
+          let gasCharge = 0;
+          let serviceChargeValue = 0;
+          let garbageChargeValue = 0;
+          let securityCharge = 0;
+          let amenitiesCharge = 0;
+          let backupGeneratorCharge = 0;
+
+          const {
+            monthlyCharge: rent,
+            serviceCharge,
+            garbageCharge,
+            securityCharge: unitSecurityCharge,
+            amenitiesCharge: unitAmenitiesCharge,
+            backupGeneratorCharge: unitBackupGeneratorCharge,
+          } = customer.unit;
+          const {
+            waterRate,
+            gasRate,
+            billWater,
+            billGas,
+            billServiceCharge,
+            billGarbage,
+            billSecurity,
+            billAmenities,
+            billBackupGenerator,
+          } = customer.unit.building;
+
+          // Handle water billing if billWater is true
+          if (billWater) {
+            const waterConsumption = await prisma.waterConsumption.findFirst({
               where: {
                 customerId: customer.id,
+                period: billingPeriod,
                 tenantId,
-                period: { lt: billingPeriod },
               },
-              orderBy: { period: 'desc' },
-              take: 3,
             });
 
-            if (pastGasReadings.length > 0) {
-              const totalConsumption = pastGasReadings.reduce((sum, reading) => sum + reading.consumption, 0);
-              const averageConsumption = totalConsumption / pastGasReadings.length;
-              gasCharge = averageConsumption * (gasRate || 0);
+            if (waterConsumption) {
+              waterCharge = waterConsumption.consumption * (waterRate || 0);
+            } else if (allowWaterBillingWithAverages) {
+              const pastWaterReadings = await prisma.waterConsumption.findMany({
+                where: {
+                  customerId: customer.id,
+                  tenantId,
+                  period: { lt: billingPeriod },
+                },
+                orderBy: { period: 'desc' },
+                take: 3,
+              });
+
+              if (pastWaterReadings.length > 0) {
+                const totalConsumption = pastWaterReadings.reduce((sum, reading) => sum + reading.consumption, 0);
+                const averageConsumption = totalConsumption / pastWaterReadings.length;
+                waterCharge = averageConsumption * (waterRate || 0);
+              }
             }
           }
-        }
 
-        // Handle other charges based on billing flags
-        if (billServiceCharge) {
-          serviceChargeValue = serviceCharge || 0;
-        }
-        if (billGarbage) {
-          garbageChargeValue = garbageCharge || 0;
-        }
-        if (billSecurity) {
-          securityCharge = unitSecurityCharge || 0;
-        }
-        if (billAmenities) {
-          amenitiesCharge = unitAmenitiesCharge || 0;
-        }
-        if (billBackupGenerator) {
-          backupGeneratorCharge = unitBackupGeneratorCharge || 0;
-        }
+          // Handle gas billing if billGas is true
+          if (billGas) {
+            const gasConsumption = await prisma.gasConsumption.findFirst({
+              where: {
+                customerId: customer.id,
+                period: billingPeriod,
+                tenantId,
+              },
+            });
 
-        // Calculate total invoice amount
-        const invoiceAmount =
-          rent +
-          serviceChargeValue +
-          garbageChargeValue +
-          waterCharge +
-          gasCharge +
-          securityCharge +
-          amenitiesCharge +
-          backupGeneratorCharge;
+            if (gasConsumption) {
+              gasCharge = gasConsumption.consumption * (gasRate || 0);
+            } else if (allowGasBillingWithAverages) {
+              const pastGasReadings = await prisma.gasConsumption.findMany({
+                where: {
+                  customerId: customer.id,
+                  tenantId,
+                  period: { lt: billingPeriod },
+                },
+                orderBy: { period: 'desc' },
+                take: 3,
+              });
 
-        // Determine invoice status and amount paid based on closing balance
-        const previousClosingBalance = customer.closingBalance || 0;
-        let status = 'UNPAID';
-        let amountPaid = 0;
-        let newClosingBalance = previousClosingBalance + invoiceAmount;
-
-        if (previousClosingBalance < 0) {
-          const availableCredit = Math.abs(previousClosingBalance);
-          if (availableCredit >= invoiceAmount) {
-            status = 'PAID';
-            amountPaid = invoiceAmount;
-            newClosingBalance = previousClosingBalance + invoiceAmount;
-          } else {
-            status = 'PPAID';
-            amountPaid = availableCredit;
-            newClosingBalance = previousClosingBalance + invoiceAmount;
+              if (pastGasReadings.length > 0) {
+                const totalConsumption = pastGasReadings.reduce((sum, reading) => sum + reading.consumption, 0);
+                const averageConsumption = totalConsumption / pastGasReadings.length;
+                gasCharge = averageConsumption * (gasRate || 0);
+              }
+            }
           }
-        }
 
-        // Create the invoice and its items in a transaction
-        const invoice = await prisma.$transaction(async (tx) => {
+          // Handle other charges based on billing flags
+          if (billServiceCharge) {
+            serviceChargeValue = serviceCharge || 0;
+          }
+          if (billGarbage) {
+            garbageChargeValue = garbageCharge || 0;
+          }
+          if (billSecurity) {
+            securityCharge = unitSecurityCharge || 0;
+          }
+          if (billAmenities) {
+            amenitiesCharge = unitAmenitiesCharge || 0;
+          }
+          if (billBackupGenerator) {
+            backupGeneratorCharge = unitBackupGeneratorCharge || 0;
+          }
+
+          // Calculate total invoice amount
+          const invoiceAmount =
+            rent +
+            serviceChargeValue +
+            garbageChargeValue +
+            waterCharge +
+            gasCharge +
+            securityCharge +
+            amenitiesCharge +
+            backupGeneratorCharge;
+
+          // Determine invoice status and amount paid based on closing balance
+          const previousClosingBalance = customer.closingBalance || 0;
+          let status = 'UNPAID';
+          let amountPaid = 0;
+          let newClosingBalance = previousClosingBalance + invoiceAmount;
+
+          if (previousClosingBalance < 0) {
+            const availableCredit = Math.abs(previousClosingBalance);
+            if (availableCredit >= invoiceAmount) {
+              status = 'PAID';
+              amountPaid = invoiceAmount;
+              newClosingBalance = previousClosingBalance + invoiceAmount;
+            } else {
+              status = 'PPAID';
+              amountPaid = availableCredit;
+              newClosingBalance = previousClosingBalance + invoiceAmount;
+            }
+          }
+
           // Create invoice
-          const newInvoice = await tx.invoice.create({
+          const newInvoice = await prisma.invoice.create({
             data: {
               tenantId,
               customerId: customer.id,
@@ -903,7 +906,7 @@ const generateInvoicesForAll = async (req, res) => {
           ];
 
           // Create invoice items
-          await tx.invoiceItem.createMany({
+          await prisma.invoiceItem.createMany({
             data: invoiceItems.map((item) => ({
               invoiceId: newInvoice.id,
               description: item.description,
@@ -913,38 +916,36 @@ const generateInvoicesForAll = async (req, res) => {
           });
 
           // Update customer closing balance
-          await tx.customer.update({
+          await prisma.customer.update({
             where: { id: customer.id },
             data: { closingBalance: newClosingBalance },
           });
 
-          return newInvoice;
-        }, { timeout: 20000 });
-
-        results.push({
-          customerId: customer.id,
-          invoiceId: invoice.id,
-          invoiceNumber,
-          totalAmount: invoiceAmount,
-          status,
-          amountPaid,
-          newClosingBalance,
-        });
-        generatedCustomerIds.push(customer.id); // Add customer ID to the list
-      } catch (error) {
-        errors.push({
-          customerId: customer.id,
-          message: error.message || 'Failed to generate invoice.',
-        });
-      }
-    }
+          results.push({
+            customerId: customer.id,
+            invoiceId: newInvoice.id,
+            invoiceNumber,
+            totalAmount: invoiceAmount,
+            status,
+            amountPaid,
+            newClosingBalance,
+          });
+          generatedCustomerIds.push(customer.id); // Add customer ID to the list
+        } catch (error) {
+          errors.push({
+            customerId: customer.id,
+            message: error.message || 'Failed to generate invoice.',
+          });
+        }
+      })
+    );
 
     // Log to UserActivity (single entry)
     await prisma.userActivity.create({
       data: {
-        user: { connect: { id: currentUserFromAuth.user } },
+        user: { connect: { id: userId } },
         tenant: { connect: { id: tenantId } },
-        action: `Invoices generated for ${results.length} customers`,
+        action: `Invoices generated for ${results.length} customers in FULL buildings`,
         details: {
           customerIds: generatedCustomerIds,
           period: period,
@@ -964,9 +965,10 @@ const generateInvoicesForAll = async (req, res) => {
   } catch (error) {
     console.error('Error in generateInvoicesForAll:', error);
     res.status(500).json({ error: 'Failed to process invoice generation.', details: error.message });
+  } finally {
+    await prisma.$disconnect();
   }
 };
-
 
 
 

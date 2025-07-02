@@ -392,6 +392,8 @@ const uploadLease = async (req, res) => {
 };
 
 
+
+
 async function uploadLandlord(req, res) {
   const { tenantId, user: userId } = req.user;
 
@@ -407,6 +409,7 @@ async function uploadLandlord(req, res) {
     const filePath = req.file.path;
     const results = [];
     const errors = [];
+    const auditLogs = [];
 
     // Parse file (CSV or Excel)
     const processFile = () => {
@@ -445,6 +448,9 @@ async function uploadLandlord(req, res) {
 
     await processFile();
 
+    // Log parsed results for debugging
+    console.log('Parsed results:', JSON.stringify(results, null, 2));
+
     // Validate headers
     const requiredHeaders = ['phoneNumber'];
     const optionalHeaders = ['firstName', 'lastName', 'email'];
@@ -459,7 +465,6 @@ async function uploadLandlord(req, res) {
     const landlordsToCreate = [];
     const phoneNumbers = new Set();
     const emails = new Set();
-    const auditLogs = [];
 
     for (let i = 0; i < results.length; i++) {
       const row = results[i];
@@ -482,11 +487,6 @@ async function uploadLandlord(req, res) {
       }
 
       const sanitizedPhoneNumber = sanitizePhoneNumber(row.phoneNumber);
-      // Optional: Validate phone number format (uncomment if needed)
-      // if (!/^\+?\d{10,15}$/.test(sanitizedPhoneNumber)) {
-      //   errors.push(`Row ${rowNumber}: Invalid phoneNumber format: ${sanitizedPhoneNumber}`);
-      //   continue;
-      // }
 
       // Skip duplicate phone numbers in the file
       if (phoneNumbers.has(sanitizedPhoneNumber)) {
@@ -648,6 +648,7 @@ async function uploadLandlord(req, res) {
     }
   }
 }
+
 
 // Helper function to sanitize phone numbers
 

@@ -10,6 +10,9 @@ const { PrismaClient, CustomerStatus, LandlordStatus, UnitStatus} = require('@pr
 const prisma = new PrismaClient();
 
 
+const fsPromises = require('fs').promises;
+
+
 
 // Create uploads directory and leases subdirectory if they don't exist
 const uploadsDir = path.join(__dirname, '..', 'Uploads');
@@ -388,7 +391,9 @@ const uploadLease = async (req, res) => {
   }
 };
 
-const uploadLandlord = async (req, res) => {
+
+
+async function uploadLandlord(req, res) {
   const { tenantId, user: userId } = req.user;
 
   try {
@@ -442,7 +447,8 @@ const uploadLandlord = async (req, res) => {
     await processFile();
 
     // Validate headers
-    const requiredHeaders = ['firstName', 'lastName', 'phoneNumber'];
+    const requiredHeaders = ['phoneNumber'];
+    const optionalHeaders = ['firstName', 'lastName', 'email'];
     const headers = Object.keys(results[0] || {});
     const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header));
     if (missingHeaders.length > 0) {
@@ -459,49 +465,58 @@ const uploadLandlord = async (req, res) => {
       const row = results[i];
       const rowNumber = i + 2; // Account for header row
 
-      // Validate mandatory fields
-      if (!row.firstName || !row.firstName.trim()) {
-        errors.push(`Row ${rowNumber}: Missing firstName`);
-        continue;
-      }
-      if (!row.lastName || !row.lastName.trim()) {
-        errors.push(`Row ${rowNumber}: Missing lastName`);
-        continue;
-      }
+      // Skip rows without phoneNumber
       if (!row.phoneNumber || !row.phoneNumber.trim()) {
-        errors.push(`Row ${rowNumber}: Missing phoneNumber`);
+        console.log(`Row ${rowNumber}: Skipped due to missing phoneNumber`);
         continue;
       }
 
       const sanitizedPhoneNumber = sanitizePhoneNumber(row.phoneNumber);
-      // if (!/^\+?\d{10,15}$/.test(row.phoneNumber)) {
+      // Optional: Validate phone number format (uncomment if needed)
+      // if (!/^\+?\d{10,15}$/.test(sanitizedPhoneNumber)) {
       //   errors.push(`Row ${rowNumber}: Invalid phoneNumber format: ${sanitizedPhoneNumber}`);
       //   continue;
       // }
 
+      // Check for duplicate phone numbers in the file
       if (phoneNumbers.has(sanitizedPhoneNumber)) {
-        errors.push(`Row ${rowNumber}: Duplicate phoneNumber in file: ${sanitizedPhoneNumber}`);
+        errors.push(`Row ${rowNumber}: Duplicate phone number in file: ${sanitizedPhoneNumber}`);
         continue;
       }
       phoneNumbers.add(sanitizedPhoneNumber);
 
+      // Handle email validation
       if (row.email && row.email.trim()) {
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) {
-          errors.push(`Row ${rowNumber}: Invalid email format: ${row.email}`);
+        const sanitizedEmail = row.email.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sanitizedEmail)) {
+          errors.push(`Row ${rowNumber}: Invalid email format: ${sanitizedEmail}`);
           continue;
         }
-        if (emails.has(row.email)) {
-          errors.push(`Row ${rowNumber}: Duplicate email in file: ${row.email}`);
+        if (emails.has(sanitizedEmail)) {
+          errors.push(`Row ${rowNumber}: Duplicate email in file: ${sanitizedEmail}`);
           continue;
         }
-        emails.add(row.email);
+        emails.add(sanitizedEmail);
+      }
+
+      // Handle names: Use available name for both firstName and lastName
+      let firstName = row.firstName ? row.firstName.trim() : '';
+      let lastName = row.lastName ? row.lastName.trim() : '';
+      if (!firstName && !lastName) {
+        errors.push(`Row ${rowNumber}: At least one of firstName or lastName is required`);
+        continue;
+      }
+      if (!firstName && lastName) {
+        firstName = lastName; // Use lastName for both
+      } else if (!lastName && firstName) {
+        lastName = firstName; // Use firstName for both
       }
 
       landlordsToCreate.push({
         id: uuidv4(),
         tenantId,
-        firstName: row.firstName.trim(),
-        lastName: row.lastName.trim(),
+        firstName,
+        lastName,
         phoneNumber: sanitizedPhoneNumber,
         email: row.email ? row.email.trim() : null,
         status: LandlordStatus.ACTIVE,
@@ -515,7 +530,7 @@ const uploadLandlord = async (req, res) => {
       where: {
         OR: [
           { phoneNumber: { in: Array.from(phoneNumbers) } },
-          { email: { in: Array.from(emails).filter(e => e) } },
+          { email: { in: Array.from(emails).filter((e) => e) } },
         ],
       },
       select: { phoneNumber: true, email: true },
@@ -568,6 +583,7 @@ const uploadLandlord = async (req, res) => {
               lastName: landlord.lastName,
               phoneNumber: landlord.phoneNumber,
               email: landlord.email,
+              timestamp: new Date().toISOString(),
             },
             createdAt: new Date(),
           },
@@ -585,9 +601,14 @@ const uploadLandlord = async (req, res) => {
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    res.status(500).json({ message: error.message || 'Failed to upload landlords' });
+    if (!res.headersSent) {
+      res.status(500).json({ message: error.message || 'Failed to upload landlords' });
+    }
   }
-};
+}
+
+
+
 
 const downloadLease = async (req, res) => {
   const { tenantId, user: userId } = req.user;

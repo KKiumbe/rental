@@ -392,7 +392,6 @@ const uploadLease = async (req, res) => {
 };
 
 
-
 async function uploadLandlord(req, res) {
   const { tenantId, user: userId } = req.user;
 
@@ -460,6 +459,7 @@ async function uploadLandlord(req, res) {
     const landlordsToCreate = [];
     const phoneNumbers = new Set();
     const emails = new Set();
+    const auditLogs = [];
 
     for (let i = 0; i < results.length; i++) {
       const row = results[i];
@@ -467,6 +467,16 @@ async function uploadLandlord(req, res) {
 
       // Skip rows without phoneNumber
       if (!row.phoneNumber || !row.phoneNumber.trim()) {
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'SKIPPED_LANDLORD_ROW',
+          resource: 'LANDLORD_UPLOAD',
+          description: `Skipped row ${rowNumber} due to missing phoneNumber`,
+          details: { rowNumber, row, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
         console.log(`Row ${rowNumber}: Skipped due to missing phoneNumber`);
         continue;
       }
@@ -478,9 +488,19 @@ async function uploadLandlord(req, res) {
       //   continue;
       // }
 
-      // Check for duplicate phone numbers in the file
+      // Skip duplicate phone numbers in the file
       if (phoneNumbers.has(sanitizedPhoneNumber)) {
-        errors.push(`Row ${rowNumber}: Duplicate phone number in file: ${sanitizedPhoneNumber}`);
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'SKIPPED_LANDLORD_ROW',
+          resource: 'LANDLORD_UPLOAD',
+          description: `Skipped row ${rowNumber} due to duplicate phone number in file: ${sanitizedPhoneNumber}`,
+          details: { rowNumber, row, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
+        console.log(`Row ${rowNumber}: Skipped due to duplicate phone number: ${sanitizedPhoneNumber}`);
         continue;
       }
       phoneNumbers.add(sanitizedPhoneNumber);
@@ -539,18 +559,39 @@ async function uploadLandlord(req, res) {
     const existingPhoneNumbers = new Set(existingLandlords.map((l) => l.phoneNumber));
     const existingEmails = new Set(existingLandlords.map((l) => l.email).filter((e) => e));
 
-    const duplicateErrors = [];
-    landlordsToCreate.forEach((landlord, index) => {
+    // Filter out landlords with duplicate phone numbers or emails in the database
+    const validLandlordsToCreate = [];
+    for (const landlord of landlordsToCreate) {
+      const rowNumber = results.findIndex((row) => sanitizePhoneNumber(row.phoneNumber) === landlord.phoneNumber) + 2;
       if (existingPhoneNumbers.has(landlord.phoneNumber)) {
-        duplicateErrors.push(`Row ${index + 2}: Phone number already exists in database: ${landlord.phoneNumber}`);
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'SKIPPED_LANDLORD_ROW',
+          resource: 'LANDLORD_UPLOAD',
+          description: `Skipped row ${rowNumber} due to existing phone number in database: ${landlord.phoneNumber}`,
+          details: { rowNumber, landlord, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
+        console.log(`Row ${rowNumber}: Skipped due to existing phone number in database: ${landlord.phoneNumber}`);
+        continue;
       }
       if (landlord.email && existingEmails.has(landlord.email)) {
-        duplicateErrors.push(`Row ${index + 2}: Email already exists in database: ${landlord.email}`);
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'SKIPPED_LANDLORD_ROW',
+          resource: 'LANDLORD_UPLOAD',
+          description: `Skipped row ${rowNumber} due to existing email in database: ${landlord.email}`,
+          details: { rowNumber, landlord, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
+        console.log(`Row ${rowNumber}: Skipped due to existing email in database: ${landlord.email}`);
+        continue;
       }
-    });
-
-    if (duplicateErrors.length > 0) {
-      errors.push(...duplicateErrors);
+      validLandlordsToCreate.push(landlord);
     }
 
     if (errors.length > 0) {
@@ -558,7 +599,7 @@ async function uploadLandlord(req, res) {
       return res.status(400).json({ message: 'Validation errors', errors });
     }
 
-    if (landlordsToCreate.length === 0) {
+    if (validLandlordsToCreate.length === 0) {
       fs.unlinkSync(filePath);
       return res.status(400).json({ message: 'No valid landlords to create' });
     }
@@ -566,9 +607,9 @@ async function uploadLandlord(req, res) {
     // Create landlords and audit logs in a transaction
     await prisma.$transaction([
       prisma.landlord.createMany({
-        data: landlordsToCreate,
+        data: validLandlordsToCreate,
       }),
-      ...landlordsToCreate.map((landlord) =>
+      ...validLandlordsToCreate.map((landlord) =>
         prisma.auditLog.create({
           data: {
             id: uuidv4(),
@@ -589,12 +630,13 @@ async function uploadLandlord(req, res) {
           },
         })
       ),
+      ...auditLogs.map((log) => prisma.auditLog.create({ data: log })),
     ]);
 
     fs.unlinkSync(filePath);
     res.status(201).json({
-      message: `Successfully created ${landlordsToCreate.length} landlord(s)`,
-      landlords: landlordsToCreate,
+      message: `Successfully created ${validLandlordsToCreate.length} landlord(s)`,
+      landlords: validLandlordsToCreate,
     });
   } catch (error) {
     console.error('Error uploading landlords:', error);
@@ -607,6 +649,10 @@ async function uploadLandlord(req, res) {
   }
 }
 
+// Helper function to sanitize phone numbers
+function sanitizePhoneNumber(phone) {
+  return phone.replace(/\s/g, '').replace(/[-()]/g, '');
+}
 
 
 

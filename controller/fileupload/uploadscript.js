@@ -650,9 +650,7 @@ async function uploadLandlord(req, res) {
 }
 
 // Helper function to sanitize phone numbers
-function sanitizePhoneNumber(phone) {
-  return phone.replace(/\s/g, '').replace(/[-()]/g, '');
-}
+
 
 
 

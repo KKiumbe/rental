@@ -10,6 +10,7 @@ const { generateDormantCustomersReport, getDormantCustomersReport } = require('.
 const { generateMonthlyInvoiceReport } = require('../../controller/reports/monthlyInvoiceReport.js');
 const { generatePaymentReportPDF, generateMpesaReport, generateReceiptReport, generateIncomeReport } = require('../../controller/reports/payment/paymentReport.js');
 const { getLandlordRentReport, getIncomePerBuilding, getIncomePerLandlord } = require('../../controller/reports/landlord/landlordReport.js');
+const { getExpectedIncomePerBillType } = require('../../controller/reports/invoices/expectedIncome.js');
 const router = express.Router();
 
 // Define the route for the debt report
@@ -37,7 +38,8 @@ router.get('/reports/age-analysis',verifyToken, checkAccess("invoices", "read"),
 router.get('/reports/customers-debt-high',verifyToken, checkAccess("invoices", "read"), getCustomersWithHighDebt);
 router.get('/reports/customers-debt-low',verifyToken, checkAccess("invoices", "read"), getCustomersWithLowBalance);
 
-
+//expected income report
+router.get('/reports/expected-income-per-type',verifyToken, checkAccess("invoices", "read"), getExpectedIncomePerBillType); //done
 
 router.get('/download-invoice/:invoiceId',verifyToken, checkAccess("invoices", "read"), downloadInvoice); 
 

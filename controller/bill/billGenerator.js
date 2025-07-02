@@ -1,4 +1,4 @@
-const { PrismaClient, InvoiceStatus,CustomerStatus , DepositStatus} = require('@prisma/client');
+const { PrismaClient, InvoiceStatus,CustomerStatus , DepositStatus,InvoiceType} = require('@prisma/client');
 const { json } = require('express');
 //const { GarbageCollectionDay } = require('./enum.js'); // Adjust the path if needed
 
@@ -181,6 +181,7 @@ async function processCustomerBatchForAll(customers, currentMonth, year, userId)
       invoiceAmount: parseFloat(invoiceAmount.toFixed(2)),
       closingBalance: parseFloat(newClosingBalance.toFixed(2)),
       status,
+      invoiceType: InvoiceType.RENT_PLUS, // Set invoice type to RENT_PLUS
       isSystemGenerated: true,
       createdBy: 'System',
       createdAt: new Date(),
@@ -309,6 +310,7 @@ async function processCustomerBatch(customers, tenantId, currentMonth) {
           closingBalance: newClosingBalance,
           invoiceAmount,
           status,
+          invoiceType: InvoiceType.RENT_PLUS, // Set invoice type to RENT_PLUS
           isSystemGenerated: true,
         },
       });
@@ -873,6 +875,7 @@ const generateInvoicesForAll = async (req, res) => {
               invoiceAmount,
               amountPaid,
               status,
+              invoiceType: InvoiceType.RENT_PLUS, // Set invoice type to RENT_PLUS
               closingBalance: invoiceAmount - amountPaid,
               isSystemGenerated: true,
               createdBy,
@@ -1121,6 +1124,7 @@ const createInitialInvoice = async (req, res) => {
           invoiceAmount,
           amountPaid: 0,
           status: InvoiceStatus.UNPAID, // Using InvoiceStatus enum
+          invoiceType: InvoiceType.RENT_PLUS, // Set invoice type to RENT_PLUS
           closingBalance: invoiceAmount,
           isSystemGenerated: false,
           createdBy: currentUser.firstName + ' ' + currentUser.lastName,
@@ -1438,6 +1442,7 @@ const invoiceCreate = async (req, res) => {
         invoiceAmount: parseFloat(invoiceAmount.toFixed(2)),
         amountPaid: 0,
         status: InvoiceStatus.UNPAID,
+        invoiceType: InvoiceType.RENT_PLUS, // Set invoice type to RENT_PLUS
         closingBalance: newClosingBalance,
         isSystemGenerated,
         createdBy,
@@ -1596,6 +1601,7 @@ const invoiceCreate = async (req, res) => {
             closingBalance: newClosingBalance,
             invoiceAmount,
             status: invoiceStatus,
+            invoiceType: 'RENT_PLUS', // Assuming RENT_PLUS is the type for manual invoices
             isSystemGenerated: false,
             createdBy: `${currentUser.firstName} ${currentUser.lastName}`,
           },

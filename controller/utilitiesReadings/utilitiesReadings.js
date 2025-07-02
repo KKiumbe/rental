@@ -1,5 +1,5 @@
-const { PrismaClient,BillType } = require('@prisma/client');
-const { sendSMS } = require('../sms/sms');
+const { PrismaClient,BillType ,InvoiceType} = require('@prisma/client');
+
 const prisma = new PrismaClient();
 
 const getStartOfCurrentMonthUTC = () => {
@@ -21,6 +21,7 @@ const InvoiceStatus = {
 
 
 const createWaterReading = async (req, res) => {
+  const { sendSMS } = require('../sms/sms.js');
   const { customerId, reading, meterPhotoUrl } = req.body;
   const { tenantId, user: userId } = req.user;
   const now = new Date();
@@ -193,6 +194,7 @@ const createWaterReading = async (req, res) => {
           invoiceNumber: `INV-WTR-${Date.now()}`,
           invoiceAmount,
           amountPaid: paidAmount,
+          invoiceType: InvoiceType.WATER, // Use new enum
           status,
           closingBalance: invoiceAmount - paidAmount,
           isSystemGenerated: true,

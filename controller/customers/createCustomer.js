@@ -343,4 +343,61 @@ async function getCustomerDeposits(req, res) {
 }
 
 
-module.exports = { createCustomer, activateCustomer,getCustomerDeposits };
+
+
+async function getCustomersByUnitId(req, res) {
+  const { unitId } = req.params;
+  const tenantId = req.user?.tenantId;  // Multi-tenant isolation
+
+  if (!tenantId) {
+    return res.status(401).json({ success: false, message: 'Unauthorized: tenant not identified.' });
+  }
+
+  try {
+    // Check if unit exists under tenant
+    const unit = await prisma.unit.findFirst({
+      where: {
+        id: unitId,
+        tenantId
+      }
+    });
+
+    if (!unit) {
+      return res.status(404).json({ success: false, message: 'Unit not found.' });
+    }
+
+    // Get customers linked to this unit + tenant
+    const customers = await prisma.customer.findMany({
+      where: {
+        unitId: unitId,
+        tenantId: tenantId
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phoneNumber: true,
+        secondaryPhoneNumber: true,
+        nationalId: true,
+        status: true,
+        leaseStartDate: true,
+        leaseEndDate: true,
+        closingBalance: true
+      }
+    });
+
+    return res.json({
+      success: true,
+      data: customers
+    });
+
+  } catch (error) {
+    console.error('Error fetching customers by unit ID:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+}
+
+
+
+module.exports = { createCustomer, activateCustomer,getCustomerDeposits ,getCustomersByUnitId };

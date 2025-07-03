@@ -327,6 +327,299 @@ const uploadCustomers = async (req, res) => {
   }
 };
 
+
+
+async function uploadCustomersWithBuilding(req, res) {
+  const { tenantId, user: userId } = req.user;
+  const { buildingId } = req.body; // Get buildingId from request body
+
+  try {
+    // Validate tenantId, userId, and buildingId
+    if (!tenantId || !userId) {
+      return res.status(401).json({ success: false, message: 'Unauthorized: Tenant or User ID missing' });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({ success: false, message: 'No file uploaded' });
+    }
+
+    if (!buildingId) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: 'Missing buildingId in request body' });
+    }
+
+    // Verify building exists and belongs to tenant
+    const building = await prisma.building.findFirst({
+      where: { id: buildingId, tenantId },
+    });
+    if (!building) {
+      fs.unlinkSync(req.file.path);
+      return res.status(400).json({ success: false, message: `Building with ID ${buildingId} not found or does not belong to tenant` });
+    }
+
+    const filePath = req.file.path;
+    const customersToCreate = [];
+    const errors = [];
+    const auditLogs = [];
+
+    // Fetch existing customers for duplicate phone number check
+    const existingCustomers = await prisma.customer.findMany({
+      where: { tenantId },
+      select: { phoneNumber: true },
+    });
+    const existingPhoneNumbers = new Set(existingCustomers.map((c) => c.phoneNumber));
+
+    // Parse file (CSV or Excel)
+    const processFile = () => {
+      return new Promise((resolve, reject) => {
+        if (req.file.mimetype.includes('spreadsheetml')) {
+          // Parse Excel file
+          const workbook = new ExcelJS.Workbook();
+          workbook.xlsx.readFile(filePath)
+            .then(() => {
+              const worksheet = workbook.getWorksheet(1);
+              const headers = {};
+              worksheet.getRow(1).eachCell((cell, colNumber) => {
+                headers[cell.text] = colNumber;
+              });
+              const rows = [];
+              worksheet.eachRow((row, rowNumber) => {
+                if (rowNumber === 1) return; // Skip header row
+                const rowData = {};
+                Object.keys(headers).forEach((header) => {
+                  rowData[header] = row.getCell(headers[header]).text || '';
+                });
+                rows.push(rowData);
+              });
+              resolve(rows);
+            })
+            .catch(reject);
+        } else {
+          // Parse CSV file
+          const rows = [];
+          fs.createReadStream(filePath)
+            .pipe(csv())
+            .on('data', (row) => rows.push(row))
+            .on('end', () => resolve(rows))
+            .on('error', reject);
+        }
+      });
+    };
+
+    const rows = await processFile();
+
+    // Log parsed results for debugging
+    console.log('Parsed results:', JSON.stringify(rows, null, 2));
+
+    // Validate headers
+    const requiredHeaders = ['phoneNumber', 'unitNumber']; // Updated: removed firstName, lastName, landlordPhoneNumber, buildingName
+    const optionalHeaders = ['firstName', 'lastName', 'email', 'closingBalance'];
+    const headers = Object.keys(rows[0] || {});
+    const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header));
+    if (missingHeaders.length > 0) {
+      fs.unlinkSync(filePath);
+      return res.status(400).json({ success: false, message: `Missing required headers: ${missingHeaders.join(', ')}` });
+    }
+
+    const csvPhoneNumbers = new Set();
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const rowNumber = i + 2; // Account for header row
+
+      // Skip rows without phoneNumber
+      if (!row.phoneNumber || !row.phoneNumber.trim()) {
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'SKIPPED_CUSTOMER_ROW',
+          resource: 'CUSTOMER_UPLOAD',
+          description: `Skipped row ${rowNumber} due to missing phoneNumber`,
+          details: { rowNumber, row, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
+        console.log(`Row ${rowNumber}: Skipped due to missing phoneNumber`);
+        continue;
+      }
+
+      const sanitizedPhoneNumber = sanitizePhoneNumber(row.phoneNumber);
+
+      // Skip duplicate phone numbers in the file
+      if (csvPhoneNumbers.has(sanitizedPhoneNumber)) {
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'SKIPPED_CUSTOMER_ROW',
+          resource: 'CUSTOMER_UPLOAD',
+          description: `Skipped row ${rowNumber} due to duplicate phone number in file: ${sanitizedPhoneNumber}`,
+          details: { rowNumber, row, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
+        console.log(`Row ${rowNumber}: Skipped due to duplicate phone number: ${sanitizedPhoneNumber}`);
+        continue;
+      }
+      csvPhoneNumbers.add(sanitizedPhoneNumber);
+
+      // Skip duplicate phone numbers in the database
+      if (existingPhoneNumbers.has(sanitizedPhoneNumber)) {
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'SKIPPED_CUSTOMER_ROW',
+          resource: 'CUSTOMER_UPLOAD',
+          description: `Skipped row ${rowNumber} due to existing phone number in database: ${sanitizedPhoneNumber}`,
+          details: { rowNumber, row, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
+        console.log(`Row ${rowNumber}: Skipped due to existing phone number in database: ${sanitizedPhoneNumber}`);
+        continue;
+      }
+
+      // Handle email validation
+      if (row.email && row.email.trim()) {
+        const sanitizedEmail = row.email.trim();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(sanitizedEmail)) {
+          errors.push({ row: rowNumber, reason: `Invalid email format: ${sanitizedEmail}` });
+          continue;
+        }
+        // Note: Duplicate email check could be added if required
+      }
+
+      // Handle names: Use available name for both firstName and lastName
+      let firstName = row.firstName ? row.firstName.trim() : '';
+      let lastName = row.lastName ? row.lastName.trim() : '';
+      if (!firstName && !lastName) {
+        errors.push({ row: rowNumber, reason: 'At least one of firstName or lastName is required' });
+        continue;
+      }
+      if (!firstName && lastName) {
+        firstName = lastName; // Use lastName for both
+      } else if (!lastName && firstName) {
+        lastName = firstName; // Use firstName for both
+      }
+
+      // Validate unit number
+      const unitNumber = row.unitNumber?.trim();
+      if (!unitNumber) {
+        errors.push({ row: rowNumber, reason: 'Missing unit number' });
+        continue;
+      }
+
+      // Check or create unit
+      let unit = await prisma.unit.findFirst({
+        where: { tenantId, buildingId, unitNumber },
+      });
+
+      if (!unit) {
+        unit = await prisma.unit.create({
+          data: {
+            id: uuidv4(),
+            tenantId,
+            buildingId,
+            unitNumber,
+            monthlyCharge: parseFloat(row.monthlyCharge) || 0,
+            depositAmount: row.depositAmount ? parseFloat(row.depositAmount) : 0,
+            garbageCharge: row.garbageCharge ? parseFloat(row.garbageCharge) : null,
+            serviceCharge: row.serviceCharge ? parseFloat(row.serviceCharge) : null,
+            securityCharge: row.securityCharge ? parseFloat(row.securityCharge) : null,
+            amenitiesCharge: row.amenitiesCharge ? parseFloat(row.amenitiesCharge) : null,
+            backupGeneratorCharge: row.backupGeneratorCharge ? parseFloat(row.backupGeneratorCharge) : null,
+            status: UnitStatus.OCCUPIED,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+        auditLogs.push({
+          id: uuidv4(),
+          tenantId,
+          userId: parseInt(userId),
+          action: 'CREATE',
+          resource: 'UNIT',
+          description: `Unit ${unitNumber} created for building ${buildingId}`,
+          details: { unitId: unit.id, unitNumber, buildingId, timestamp: new Date().toISOString() },
+          createdAt: new Date(),
+        });
+      }
+
+      customersToCreate.push({
+        id: uuidv4(),
+        tenantId,
+        firstName,
+        lastName,
+        phoneNumber: sanitizedPhoneNumber,
+        unitId: unit.id,
+        closingBalance: parseFloat(row.closingBalance) || 0,
+        status: CustomerStatus.ACTIVE,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+    }
+
+    if (errors.length > 0) {
+      fs.unlinkSync(filePath);
+      return res.status(400).json({ success: false, message: 'Validation errors', errors });
+    }
+
+    if (customersToCreate.length === 0) {
+      fs.unlinkSync(filePath);
+      return res.status(400).json({ success: false, message: 'No valid customers to create' });
+    }
+
+    // Create customers and audit logs in a transaction
+    await prisma.$transaction([
+      prisma.customer.createMany({
+        data: customersToCreate,
+        skipDuplicates: true,
+      }),
+      ...customersToCreate.map((customer) =>
+        prisma.auditLog.create({
+          data: {
+            id: uuidv4(),
+            tenantId,
+            userId: parseInt(userId),
+            customerId: customer.id,
+            action: 'CREATE',
+            resource: 'CUSTOMER',
+            description: `Customer ${customer.firstName} ${customer.lastName} created`,
+            details: {
+              customerId: customer.id,
+              firstName: customer.firstName,
+              lastName: customer.lastName,
+              phoneNumber: customer.phoneNumber,
+              unitId: customer.unitId,
+              timestamp: new Date().toISOString(),
+            },
+            createdAt: new Date(),
+          },
+        })
+      ),
+      ...auditLogs.map((log) => prisma.auditLog.create({ data: log })),
+    ]);
+
+    fs.unlinkSync(filePath);
+    res.status(201).json({
+      success: true,
+      message: `Successfully created ${customersToCreate.length} customer(s)`,
+      customers: customersToCreate,
+    });
+  } catch (error) {
+    console.error('Error uploading customers:', error);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: 'Error uploading customers', error: error.message });
+    }
+  }
+}
+
+
+
+
+
 const uploadLease = async (req, res) => {
   const { tenantId, user: userId } = req.user;
 
@@ -724,5 +1017,5 @@ module.exports = {
   upload,
   uploadCustomers,
   uploadLease,
-  downloadLease,uploadLandlord
+  downloadLease,uploadLandlord,uploadCustomersWithBuilding
 };

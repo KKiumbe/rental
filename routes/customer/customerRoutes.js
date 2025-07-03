@@ -1,6 +1,6 @@
 // routes/customerRoutes.js
 const express = require('express');
-const { createCustomer, activateCustomer, getCustomerDeposits } = require('../../controller/customers/createCustomer.js');
+const { createCustomer, activateCustomer, getCustomerDeposits, getCustomersByUnitId } = require('../../controller/customers/createCustomer.js');
 const { getAllCustomers } = require('../../controller/customers/getAllCustomers.js');
 const { editCustomer } = require('../../controller/customers/editCustomer.js');
 const { SearchCustomers, SearchCustomersByPhoneNumber, SearchCustomersByName } = require('../../controller/customers/searchCustomers.js');
@@ -30,6 +30,9 @@ router.post(
 router.get("/customers/:id/deposits",verifyToken, getCustomerDeposits);
 router.get('/customers', verifyToken, checkAccess('customer','read') ,getAllCustomers);
 router.put('/customers/:id',verifyToken,checkAccess('customer','update'), editCustomer);
+
+router.get('/units/:unitId/customers', verifyToken, getCustomersByUnitId);
+
 router.get('/search-customers',verifyToken, SearchCustomers);
 router.delete('/customers/:id',verifyToken,checkAccess('customer','delete'), deleteCustomer);
 

@@ -1241,7 +1241,56 @@ const getUnitsByBuilding = async (req, res) => {
   }
 };
 
+const getUnitDetailsById = async(req, res) =>{
+  const { unitId } = req.params;
+  const tenantId = req.user?.tenantId;  // Assuming multi-tenant system
+
+  if (!tenantId) {
+    return res.status(401).json({ success: false, message: 'Unauthorized: tenant not identified.' });
+  }
+
+  try {
+    const unit = await prisma.unit.findFirst({
+      where: {
+        id: unitId,
+        tenantId: tenantId
+      },
+      include: {
+        building: true,
+        tenant: true,
+        customers: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phoneNumber: true,
+            secondaryPhoneNumber: true,
+            nationalId: true,
+            status: true,
+            closingBalance: true,
+            leaseFileUrl: true,
+            createdAt: true,
+            updatedAt: true
+          }
+        }
+      }
+    });
+
+    if (!unit) {
+      return res.status(404).json({ success: false, message: 'Unit not found.' });
+    }
+
+    return res.json({ success: true, data: unit });
+  } catch (error) {
+    console.error('Error fetching unit details:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error.' });
+  }
+}
 
 
 
-module.exports = { createBuilding, searchBuildings ,createUnit, getAllBuildings, getBuildingById, getUnitsByBuilding ,editBuilding,editUnit};
+
+
+
+module.exports = { createBuilding, searchBuildings ,createUnit, getAllBuildings, getBuildingById, getUnitsByBuilding ,editBuilding,editUnit,getUnitDetailsById};

@@ -698,211 +698,11 @@ const generateInvoicesForDay = async (day) => {
 
 
 const invoiceCreate = async (req, res) => {
-  const { customerId, isSystemGenerated = true } = req.body;
-  const { tenantId, user } = req.user;
-  console.log(`user is here ${JSON.stringify(req.user)}`);
 
-  // Validate required fields
-  if (!customerId) {
-    return res.status(400).json({ message: 'Required fields: customerId' });
-  }
 
- 
 
-    try {
-      // Fetch user to get firstName and lastName
-      const currentUser = await prisma.user.findUnique({
-        where: { id: user },
-        select: { firstName: true, lastName: true},
-      });
+}
   
-<<<<<<< HEAD
-      if (!currentUser) {
-=======
-      if (!user) {
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
-        return res.status(404).json({ message: 'Authenticated user not found.' });
-      }
-
-    // Set invoice period to first day of current month
-    const invoicePeriod = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-
-    // Check if customer exists and belongs to tenant
-    const customer = await prisma.customer.findUnique({
-      where: {
-        id: customerId,
-        tenantId: tenantId,
-      },
-      include: { building: true },
-    });
-
-    if (!customer || customer.tenantId !== tenantId) {
-      return res.status(404).json({ message: 'Customer not found or does not belong to tenant.' });
-    }
-
-    // Check if customer is assigned to a building
-    if (!customer.buildingId || !customer.building) {
-      return res.status(400).json({ message: 'Customer is not assigned to a building.' });
-    }
-
-    // Check if gasRate and waterRate are defined
-    if (customer.building.gasRate === null || customer.building.waterRate === null) {
-      return res.status(400).json({ message: 'Gas rate or water rate not defined for this building.' });
-    }
-
-    // // Check if invoice exists for this period
-    // const existingInvoice = await prisma.invoice.findFirst({
-    //   where: { customerId, invoicePeriod },
-    // });
-
-    // if (existingInvoice) {
-    //   return res.status(400).json({ message: 'Invoice already exists for this customer and period.' });
-    // }
-
-    // Fetch latest consumption records
-    const gasConsumption = await prisma.gasConsumption.findFirst({
-      where: { customerId },
-      orderBy: { period: 'desc' }, // latest period first
-    });
-
-    const waterConsumption = await prisma.waterConsumption.findFirst({
-      where: { customerId },
-      orderBy: { period: 'desc' }, // latest period first
-    });
-
-    // Build invoice items
-    const invoiceItems = [];
-
-    // Rent (monthlyCharge)
-    if (customer.monthlyCharge > 0) {
-      invoiceItems.push({
-        description: 'Monthly Rent',
-        amount: parseFloat(customer.monthlyCharge.toFixed(2)),
-        quantity: 1,
-      });
-    }
-
-<<<<<<< HEAD
-    // Check if customer is assigned to a building
-    if (!customer.buildingId || !customer.building) {
-      return res.status(400).json({ message: 'Customer is not assigned to a building.' });
-    }
-
-    // Check if gasRate and waterRate are defined
-    if (customer.building.gasRate === null || customer.building.waterRate === null) {
-      return res.status(400).json({ message: 'Gas rate or water rate not defined for this building.' });
-    }
-
-    // // Check if invoice exists for this period
-    // const existingInvoice = await prisma.invoice.findFirst({
-    //   where: { customerId, invoicePeriod },
-    // });
-
-    // if (existingInvoice) {
-    //   return res.status(400).json({ message: 'Invoice already exists for this customer and period.' });
-    // }
-
-    // Fetch latest consumption records
-    const gasConsumption = await prisma.gasConsumption.findFirst({
-      where: { customerId },
-      orderBy: { period: 'desc' }, // latest period first
-    });
-=======
-    // Garbage Charge
-    if (customer.garbageCharge && customer.garbageCharge > 0) {
-      invoiceItems.push({
-        description: 'Garbage Collection',
-        amount: parseFloat(customer.garbageCharge.toFixed(2)),
-        quantity: 1,
-      });
-    }
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
-
-    // Service Charge
-    if (customer.serviceCharge && customer.serviceCharge > 0) {
-      invoiceItems.push({
-        description: 'Service Fee',
-        amount: parseFloat(customer.serviceCharge.toFixed(2)),
-        quantity: 1,
-      });
-    }
-
-    // Gas Charge
-    if (gasConsumption && gasConsumption.consumption > 0) {
-      // Verify period match
-      if (gasConsumption.period.getTime() === invoicePeriod.getTime()) {
-        invoiceItems.push({
-          description: `Gas Consumption (${gasConsumption.consumption} cubic meters)`,
-          amount: parseFloat(customer.building.gasRate.toFixed(2)),
-          quantity: parseInt(gasConsumption.consumption),
-        });
-      }
-    }
-
-    // Water Charge
-    if (waterConsumption && waterConsumption.consumption > 0) {
-      // Verify period match
-      if (waterConsumption.period.getTime() === invoicePeriod.getTime()) {
-        invoiceItems.push({
-          description: `Water Consumption (${waterConsumption.consumption} liters)`,
-          amount: parseFloat(customer.building.waterRate.toFixed(2)),
-          quantity: parseInt(waterConsumption.consumption),
-        });
-      }
-<<<<<<< HEAD
-    // The unmatched else block has been removed to fix the syntax error.
-=======
-    }
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
-
-    // Calculate invoice amount
-    const invoiceAmount = invoiceItems.reduce((sum, item) => sum + item.amount * item.quantity, 0);
-
-    // Generate unique invoice number
-    const invoiceNumber = generateInvoiceNumber(customerId);
-
-    // Determine createdBy
-    const createdBy = isSystemGenerated ? 'System' : `${currentUser.firstName} ${currentUser.lastName}`;
-     const currentClosingBalance = await getCurrentClosingBalance(customerId);
-    const newClosingBalance = currentClosingBalance + invoiceAmount;
-
-    // Create invoice with items
-    const invoice = await prisma.invoice.create({
-      data: {
-        tenantId,
-        customerId,
-        invoicePeriod,
-        invoiceNumber,
-        invoiceAmount: parseFloat(invoiceAmount.toFixed(2)),
-        isSystemGenerated,
-        createdBy,
-        status: InvoiceStatus.UNPAID,
-        amountPaid: 0,
-        closingBalance: newClosingBalance,
-        InvoiceItem: {
-          create: invoiceItems,
-        },
-      },
-      include: {
-        InvoiceItem: true,
-      },
-    });
-
-
-    await prisma.customer.update({
-      where: { id: customerId },
-      data: { closingBalance: newClosingBalance },
-    });
-
-
-    res.status(201).json({ message: 'Invoice created successfully', invoice });
-  } catch (error) {
-    console.error('Error creating invoice:', error);
-    res.status(500).json({ message: 'Internal server error' });
-  }
-};
-
-
 
 
 
@@ -1601,13 +1401,8 @@ const searchInvoices = async (req, res) => {
   }
 };
 
+  
 
-
-
-
-
-
-// Exporting all functions
 module.exports = {
   createInvoice,
   generateInvoices,
@@ -1621,5 +1416,5 @@ module.exports = {
   generateInvoicesByDay,
   generateInvoicesPerTenant,searchInvoices,
   generateInvoicesForAll ,cancelCustomerInvoice,
-  invoiceCreate
+  invoiceCreate,
 };

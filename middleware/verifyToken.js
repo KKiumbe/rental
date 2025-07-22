@@ -2,14 +2,11 @@ const jwt = require('jsonwebtoken');
 
 const verifyToken = async (req, res, next) => {
     // Get token from cookies
-<<<<<<< HEAD
+
     const token = req.cookies.token; 
     // Avoid logging sensitive token information
     
-    // Make sure the token is in the cookies
-=======
-    const token = req.cookies.token;  // Make sure the token is in the cookies
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
+  // Make sure the token is in the cookies
     
     if (!token) {
         return res.status(401).json({ message: 'Authentication token is required' });

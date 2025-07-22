@@ -4,6 +4,7 @@ const prisma = new PrismaClient();
 
 
 const createCustomer = async (req, res) => {
+
   const { tenantId } = req.user;
   const {
     buildingId,
@@ -36,8 +37,7 @@ const createCustomer = async (req, res) => {
     });
   }
 
-<<<<<<< HEAD
-=======
+
   // Validate numeric fields
   const numericFields = { monthlyCharge, garbageCharge, serviceCharge, closingBalance };
   for (const [field, value] of Object.entries(numericFields)) {
@@ -45,7 +45,7 @@ const createCustomer = async (req, res) => {
       return res.status(400).json({ message: `${field} must be a non-negative number.` });
     }
   }
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
+
 
   try {
     // Check if tenant exists
@@ -57,7 +57,7 @@ const createCustomer = async (req, res) => {
       return res.status(404).json({ message: 'Tenant not found.' });
     }
 
-<<<<<<< HEAD
+
     // Check if authenticated user exists and belongs to the tenant
     const currentUser = await prisma.user.findUnique({
       where: { id: user },
@@ -77,11 +77,11 @@ const createCustomer = async (req, res) => {
         success: false,
         message: 'User does not belong to the specified tenant.',
       });
-=======
+    }
+
     // Check if authenticated user belongs to the tenant
     if (req.user.tenantId !== tenantId) {
       return res.status(403).json({ message: 'User does not belong to the specified tenant.' });
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
     }
 
     // Check if building exists and belongs to tenant
@@ -121,7 +121,7 @@ const createCustomer = async (req, res) => {
       },
     });
 
-<<<<<<< HEAD
+
     // Update unit status to OCCUPIED
     await prisma.unit.update({
       where: { id: unitId },
@@ -146,9 +146,8 @@ const createCustomer = async (req, res) => {
       message: 'Customer created successfully',
       data: customer,
     });
-=======
+
     res.status(201).json({ message: 'Customer created successfully', customer });
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")
   } catch (error) {
     console.error('Error creating customer:', error);
 
@@ -162,7 +161,6 @@ const createCustomer = async (req, res) => {
 };
 
 
-<<<<<<< HEAD
 
 
 
@@ -350,13 +348,7 @@ async function getCustomerDeposits(req, res) {
 }
 
 
-module.exports = { createCustomer, activateCustomer,getCustomerDeposits };
+module.exports = { createCustomer, activateCustomer,getCustomerDeposits,createCustomer, getCustomerDeposits };
 
 
 
-
-module.exports = { createCustomer, activateCustomer };
-
-=======
-module.exports = { createCustomer };
->>>>>>> 27b0c48 (Revert "WIP: saving my changes before revert")

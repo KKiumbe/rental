@@ -19,6 +19,8 @@ router.post('/building', verifyToken ,createBuilding);
 
 
 router.get('/buildings/search', searchBuildings);
+
+router.get('/buildings', verifyToken, getAllBuildings);
  
 //units route
 //router.get('/units/:unitId', verifyToken, getUnitDetailsById);

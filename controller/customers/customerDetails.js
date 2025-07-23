@@ -4,16 +4,12 @@ const prisma = new PrismaClient();
 
 
 
-
 const getCustomerDetails = async (req, res) => {
   const { id } = req.params;
   const { tenantId } = req.user;
 
-  if (!tenantId) {
-    return res.status(400).json({ message: 'Tenant ID is required' });
-  }
-  if (!id || typeof id !== 'string') {
-    return res.status(400).json({ message: 'Valid Customer ID is required' });
+  if (!tenantId || !id || typeof id !== 'string') {
+    return res.status(400).json({ message: 'Valid customer ID and tenant ID are required' });
   }
 
   try {
@@ -39,29 +35,20 @@ const getCustomerDetails = async (req, res) => {
         createdAt: true,
         updatedAt: true,
 
-        CustomerUnit: {
-          // Changed from customerUnit to CustomerUnit
-          where: { isActive: true },
+        unit: {
           select: {
-            unit: {
+            id: true,
+            unitNumber: true,
+            monthlyCharge: true,
+            depositAmount: true,
+            status: true,
+            building: {
               select: {
                 id: true,
-                unitNumber: true,
-                monthlyCharge: true,
-                depositAmount: true,
-                status: true,
-                building: {
-                  select: {
-                    id: true,
-                    name: true,
-                    address: true,
-                  },
-                },
+                name: true,
+                address: true,
               },
             },
-            startDate: true,
-            endDate: true,
-            isActive: true,
           },
         },
 
@@ -73,7 +60,7 @@ const getCustomerDetails = async (req, res) => {
             status: true,
             createdAt: true,
             updatedAt: true,
-            InvoiceItem: {
+            items: {
               select: {
                 id: true,
                 description: true,
@@ -162,7 +149,8 @@ const getCustomerDetails = async (req, res) => {
       return res.status(404).json({ message: 'Customer not found or does not belong to this tenant' });
     }
 
-    const activeUnitInfo = customer.CustomerUnit[0]?.unit; // Updated to CustomerUnit
+    const activeUnit = customer.unit;
+    const unitInfo = activeUnit || {};
 
     const formattedCustomer = {
       ...customer,
@@ -175,38 +163,22 @@ const getCustomerDetails = async (req, res) => {
         : null,
       leaseStartDate: customer.leaseStartDate?.toISOString() || null,
       leaseEndDate: customer.leaseEndDate?.toISOString() || null,
-      unit: activeUnitInfo
-        ? {
-            id: activeUnitInfo.id,
-            unitNumber: activeUnitInfo.unitNumber,
-            monthlyCharge: activeUnitInfo.monthlyCharge,
-            depositAmount: activeUnitInfo.depositAmount,
-            status: activeUnitInfo.status,
-            buildingName: activeUnitInfo.building?.name || null,
-            buildingAddress: activeUnitInfo.building?.address || null,
-          }
-        : null,
+      unit: {
+        id: unitInfo.id,
+        unitNumber: unitInfo.unitNumber,
+        monthlyCharge: unitInfo.monthlyCharge,
+        depositAmount: unitInfo.depositAmount,
+        status: unitInfo.status,
+        buildingName: unitInfo.building?.name || null,
+        buildingAddress: unitInfo.building?.address || null,
+      },
+      payments: customer.payments,
     };
 
     res.status(200).json(formattedCustomer);
   } catch (error) {
-    console.error('Error retrieving customer details:', {
-      error: error.message,
-      stack: error.stack,
-      customerId: id,
-      tenantId,
-    });
-
-    if (error.name === 'PrismaClientKnownRequestError') {
-      if (error.code === 'P2025') {
-        return res.status(404).json({ message: 'Customer not found' });
-      }
-      return res.status(400).json({ message: 'Invalid database request', error: error.message });
-    }
-
+    console.error('Error retrieving customer details:', error);
     res.status(500).json({ message: 'Internal server error' });
-  } finally {
-    await prisma.$disconnect();
   }
 };
 

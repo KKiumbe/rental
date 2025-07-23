@@ -18,7 +18,7 @@ const fsPromises = require('fs').promises;
 const uploadsDir = path.join(__dirname, '..', 'Uploads');
 const leasesDir = path.join(uploadsDir, 'leases');
 if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(UploadsDir, { recursive: true });
+  fs.mkdirSync(uploadsDir, { recursive: true });
 }
 if (!fs.existsSync(leasesDir)) {
   fs.mkdirSync(leasesDir, { recursive: true });

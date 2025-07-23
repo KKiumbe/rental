@@ -6,6 +6,8 @@ const prisma = new PrismaClient();
 
 // controller/buildingController.js
 
+
+
 const getBuildingById = async (req, res) => {
   const { id } = req.params;
 
@@ -16,7 +18,10 @@ const getBuildingById = async (req, res) => {
         landlord: true,
         units: {
           include: {
-            customers: true,
+            customerUnits: {
+              where: { status: 'ACTIVE' },
+              include: { customer: true },
+            },
           },
         },
       },
@@ -26,7 +31,8 @@ const getBuildingById = async (req, res) => {
       return res.status(404).json({ message: 'Building not found' });
     }
 
-    return res.json(building);
+    // Optional: Sanitize/transform for frontend if needed
+    res.json(building);
   } catch (error) {
     console.error('Error fetching building:', error);
     res.status(500).json({ message: 'Server error' });

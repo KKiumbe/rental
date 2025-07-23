@@ -8,119 +8,21 @@ const prisma = new PrismaClient();
 
 
 
-const getBuildingById = async (req, res) => {
-  const { id } = req.params;
-
-  try {
-    const building = await prisma.building.findUnique({
-      where: { id: Number(id) },
-      include: {
-        landlord: true,
-        units: {
-          include: {
-            customerUnits: {
-              where: { status: 'ACTIVE' },
-              include: { customer: true },
-            },
-          },
-        },
-      },
-    });
-
-    if (!building) {
-      return res.status(404).json({ message: 'Building not found' });
-    }
-
-    // Optional: Sanitize/transform for frontend if needed
-    res.json(building);
-  } catch (error) {
-    console.error('Error fetching building:', error);
-    res.status(500).json({ message: 'Server error' });
-  }
-};
-
-
-
 // const getBuildingById = async (req, res) => {
-//   const tenantId = req.user?.tenantId;
-//   const { buildingId:id } = req.params;
-
-//   if (!tenantId) {
-//     return res.status(400).json({ message: 'Tenant ID is required' });
-//   }
-
-//   if (!id) {
-//     return res.status(400).json({ message: 'Building ID is required' });
-//   }
+//   const { id } = req.params;
 
 //   try {
 //     const building = await prisma.building.findUnique({
-//       where: {
-//         id,
-//         tenantId, // Ensure building belongs to tenant
-//       },
-//       select: {
-//         id: true,
-//         tenantId: true,
-//         landlordId: true,
-//         name: true,
-//         address: true,
-//         unitCount: true,
-//         gasRate: true,
-//         waterRate: true,
-//         allowWaterBillingWithAverages: true,
-//         allowGasBillingWithAverages: true,
-//         billWater: true,
-//         billGas: true,
-//         billServiceCharge: true,
-//         billGarbage: true,
-//         billSecurity: true,
-//         billAmenities: true,
-//         billBackupGenerator: true,
-      
-     
-//         createdAt: true,
-//         updatedAt: true,
-//         landlord: {
-//           select: {
-//             id: true,
-//             firstName: true,
-//             lastName: true,
-//             email: true,
-//             phoneNumber: true,
-//             createdAt: true,
-//             updatedAt: true,
-//           },
-//         },
+//       where: { id: Number(id) },
+//       include: {
+//         landlord: true,
 //         units: {
-//           select: {
-//             id: true,
-//             unitNumber: true,
-//             monthlyCharge: true,
-//             depositAmount: true,
-//             garbageCharge: true,
-//             serviceCharge: true,
-//             status: true,
-//             createdAt: true,
-//             updatedAt: true,
-//             customers: {
-//               select: {
-//                 id: true,
-//                 firstName: true,
-//                 lastName: true,
-//                 email: true,
-//                 phoneNumber: true,
-//                 secondaryPhoneNumber: true,
-//                 nationalId: true,
-//                 status: true,
-//                 closingBalance: true,
-//                 leaseFileUrl: true,
-//                 createdAt: true,
-//                 updatedAt: true,
-//               },
+//           include: {
+//             customerUnits: {
+//               where: { status: 'ACTIVE' },
+//               include: { customer: true },
 //             },
 //           },
-//           orderBy: { unitNumber: 'asc' }, // Sort units for consistency
 //         },
 //       },
 //     });
@@ -129,34 +31,132 @@ const getBuildingById = async (req, res) => {
 //       return res.status(404).json({ message: 'Building not found' });
 //     }
 
-//     // Format response
-//     const formattedBuilding = {
-//       ...building,
-//       buildingName: building.name,
-//       landlord: building.landlord
-//         ? {
-//             ...building.landlord,
-//             name: `${building.landlord.firstName} ${building.landlord.lastName}`.trim(),
-//           }
-//         : null,
-//       units: building.units.map((unit) => ({
-//         ...unit,
-//         customerCount: unit.customers.length,
-//       })),
-//       customerCount: building.units.reduce((sum, unit) => sum + unit.customers.length, 0),
-//     };
-
-//     res.status(200).json(formattedBuilding);
+//     // Optional: Sanitize/transform for frontend if needed
+//     res.json(building);
 //   } catch (error) {
 //     console.error('Error fetching building:', error);
-//     if (error.code === 'P2025') {
-//       return res.status(404).json({ message: 'Building not found' });
-//     }
-//     res.status(500).json({ message: 'Internal server error' });
-//   } finally {
-//     await prisma.$disconnect();
+//     res.status(500).json({ message: 'Server error' });
 //   }
 // };
+
+
+
+const getBuildingById = async (req, res) => {
+  const tenantId = req.user?.tenantId;
+  const { buildingId:id } = req.params;
+
+  if (!tenantId) {
+    return res.status(400).json({ message: 'Tenant ID is required' });
+  }
+
+  if (!id) {
+    return res.status(400).json({ message: 'Building ID is required' });
+  }
+
+  try {
+    const building = await prisma.building.findUnique({
+      where: {
+        id,
+        tenantId, // Ensure building belongs to tenant
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        landlordId: true,
+        name: true,
+        address: true,
+        unitCount: true,
+        gasRate: true,
+        waterRate: true,
+        allowWaterBillingWithAverages: true,
+        allowGasBillingWithAverages: true,
+        billWater: true,
+        billGas: true,
+        billServiceCharge: true,
+        billGarbage: true,
+        billSecurity: true,
+        billAmenities: true,
+        billBackupGenerator: true,
+      
+     
+        createdAt: true,
+        updatedAt: true,
+        landlord: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            phoneNumber: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        },
+        units: {
+          select: {
+            id: true,
+            unitNumber: true,
+            monthlyCharge: true,
+            depositAmount: true,
+            garbageCharge: true,
+            serviceCharge: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            customers: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+                phoneNumber: true,
+                secondaryPhoneNumber: true,
+                nationalId: true,
+                status: true,
+                closingBalance: true,
+                leaseFileUrl: true,
+                createdAt: true,
+                updatedAt: true,
+              },
+            },
+          },
+          orderBy: { unitNumber: 'asc' }, // Sort units for consistency
+        },
+      },
+    });
+
+    if (!building) {
+      return res.status(404).json({ message: 'Building not found' });
+    }
+
+    // Format response
+    const formattedBuilding = {
+      ...building,
+      buildingName: building.name,
+      landlord: building.landlord
+        ? {
+            ...building.landlord,
+            name: `${building.landlord.firstName} ${building.landlord.lastName}`.trim(),
+          }
+        : null,
+      units: building.units.map((unit) => ({
+        ...unit,
+        customerCount: unit.customers.length,
+      })),
+      customerCount: building.units.reduce((sum, unit) => sum + unit.customers.length, 0),
+    };
+
+    res.status(200).json(formattedBuilding);
+  } catch (error) {
+    console.error('Error fetching building:', error);
+    if (error.code === 'P2025') {
+      return res.status(404).json({ message: 'Building not found' });
+    }
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
+  }
+};
 
 
 

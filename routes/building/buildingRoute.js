@@ -17,7 +17,7 @@ const router = express.Router();
 
 router.post('/building', verifyToken ,createBuilding);
 
-router.get('/buildings/:id',verifyToken, getBuildingById);
+router.get('/buildings/:buildingId',verifyToken, getBuildingById);
 router.get('/buildings/search', searchBuildings);
 
 router.get('/buildings', verifyToken, getAllBuildings);

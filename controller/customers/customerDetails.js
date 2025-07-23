@@ -52,96 +52,96 @@ const getCustomerDetails = async (req, res) => {
           },
         },
 
-        invoices: {
-          select: {
-            id: true,
-            invoiceNumber: true,
-            invoiceAmount: true,
-            status: true,
-            createdAt: true,
-            updatedAt: true,
-            items: {
-              select: {
-                id: true,
-                description: true,
-                quantity: true,
-                amount: true,
-              },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
+        // invoices: {
+        //   select: {
+        //     id: true,
+        //     invoiceNumber: true,
+        //     invoiceAmount: true,
+        //     status: true,
+        //     createdAt: true,
+        //     updatedAt: true,
+        //     items: {
+        //       select: {
+        //         id: true,
+        //         description: true,
+        //         quantity: true,
+        //         amount: true,
+        //       },
+        //     },
+        //   },
+        //   orderBy: { createdAt: 'desc' },
+        //   take: 10,
+        // },
 
-        receipts: {
-          select: {
-            id: true,
-            receiptNumber: true,
-            transactionCode: true,
-            amount: true,
-            paidBy: true,
-            createdAt: true,
-            payment: {
-              select: {
-                id: true,
-                modeOfPayment: true,
-                transactionId: true,
-                amount: true,
-                createdAt: true,
-              },
-            },
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
+        // receipts: {
+        //   select: {
+        //     id: true,
+        //     receiptNumber: true,
+        //     transactionCode: true,
+        //     amount: true,
+        //     paidBy: true,
+        //     createdAt: true,
+        //     payment: {
+        //       select: {
+        //         id: true,
+        //         modeOfPayment: true,
+        //         transactionId: true,
+        //         amount: true,
+        //         createdAt: true,
+        //       },
+        //     },
+        //   },
+        //   orderBy: { createdAt: 'desc' },
+        //   take: 10,
+        // },
 
-        payments: {
-          select: {
-            id: true,
-            modeOfPayment: true,
-            transactionId: true,
-            amount: true,
-            createdAt: true,
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
+        // payments: {
+        //   select: {
+        //     id: true,
+        //     modeOfPayment: true,
+        //     transactionId: true,
+        //     amount: true,
+        //     createdAt: true,
+        //   },
+        //   orderBy: { createdAt: 'desc' },
+        //   take: 10,
+        // },
 
-        deposits: {
-          select: {
-            id: true,
-            amount: true,
-            invoiceId: true,
-            createdAt: true,
-            updatedAt: true,
-          },
-          orderBy: { createdAt: 'desc' },
-          take: 10,
-        },
+        // deposits: {
+        //   select: {
+        //     id: true,
+        //     amount: true,
+        //     invoiceId: true,
+        //     createdAt: true,
+        //     updatedAt: true,
+        //   },
+        //   orderBy: { createdAt: 'desc' },
+        //   take: 10,
+        // },
 
-        gasConsumptions: {
-          select: {
-            id: true,
-            period: true,
-            consumption: true,
-            reading: true,
-            createdAt: true,
-          },
-          orderBy: { period: 'desc' },
-          take: 10,
-        },
+        // gasConsumptions: {
+        //   select: {
+        //     id: true,
+        //     period: true,
+        //     consumption: true,
+        //     reading: true,
+        //     createdAt: true,
+        //   },
+        //   orderBy: { period: 'desc' },
+        //   take: 10,
+        // },
 
-        waterConsumptions: {
-          select: {
-            id: true,
-            period: true,
-            consumption: true,
-            reading: true,
-            createdAt: true,
-          },
-          orderBy: { period: 'desc' },
-          take: 10,
-        },
+        // waterConsumptions: {
+        //   select: {
+        //     id: true,
+        //     period: true,
+        //     consumption: true,
+        //     reading: true,
+        //     createdAt: true,
+        //   },
+        //   orderBy: { period: 'desc' },
+        //   take: 10,
+        // },
       },
     });
 
@@ -172,7 +172,7 @@ const getCustomerDetails = async (req, res) => {
         buildingName: unitInfo.building?.name || null,
         buildingAddress: unitInfo.building?.address || null,
       },
-      payments: customer.payments,
+     //payments: customer.payments,
     };
 
     res.status(200).json(formattedCustomer);

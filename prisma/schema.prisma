@@ -1,292 +1,198 @@
-// Define the database connection
-
+generator client {
+  provider = "prisma-client-js"
+}
 
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-// Generator for Prisma Client
-generator client {
-  provider = "prisma-client-js"
-}
-// Generator for Prisma Client
 
-
-// Tenant model representing an organization
 model Tenant {
-  id                Int              @id @default(autoincrement())
-  name             String
-  
-
-  createdBy         String              // User ID of the tenant creator (ADMIN)
-  status            TenantStatus     @default(ACTIVE)
-  subscriptionPlan  String           // Plan name e.g., 'Ndovu', 'Simba', 'Nyati'
-  monthlyCharge     Float 
- 
-  paymentDetails      String?           
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-
-  email               String?   
-  phoneNumber         String? 
+  id                     Int                    @id @default(autoincrement())
+  name                   String
+  createdBy              String
+  status                 TenantStatus           @default(ACTIVE)
+  subscriptionPlan       String
+  monthlyCharge          Float
+  paymentDetails         String?
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+  email                  String?
+  phoneNumber            String?
   alternativePhoneNumber String?
-              
-
-
-  county                String?
-  town                  String?
-  address                 String? //po box
-  building                String?
-
+  county                 String?
+  town                   String?
+  address                String?
+  building               String?
   street                 String?
-
-  website               String?
-  logoUrl               String?
-  allowedUsers          Int  @default(1)
-
-
-
-
-  // Relationships
-  users             User[]
-  customers         Customer[]
-  auditLogs         AuditLog[]
-  notifications     Notification[]
-
-  smsConfig         SMSConfig?
-  mpesaConfig       MPESAConfig?
-
-  //CustomRolePermission CustomRolePermission[]
-
-  Invoice Invoice[]
-
-  Receipt Receipt[]
-
-  Payment Payment[]
-
-  MPESATransaction MPESATransactions[]
-
-  Task Task[]
-
-
-
-  tenantInvoices  TenantInvoice[]    // Add this relation
-  tenantPayments  TenantPayment[]
-
-  SMS SMS[]
-
-
-
-  Building Building[]
-
-  Landlord Landlord[]
-
-  Deposit Deposit[]
-
-  Unit Unit[]
-
-  UserActivity UserActivity[]
-
-  WaterConsumption WaterConsumption[]
-
-  GasConsumption GasConsumption[]
-
-  LeaseTermination LeaseTermination[]
+  website                String?
+  logoUrl                String?
+  allowedUsers           Int                    @default(1)
+  AbnormalWaterReading   AbnormalWaterReading[]
+  auditLogs              AuditLog[]
+  Building               Building[]
+  customers              Customer[]
+  Deposit                Deposit[]
+  GasConsumption         GasConsumption[]
+  Invoice                Invoice[]
+  Landlord               Landlord[]
+  LeaseTermination       LeaseTermination[]
+  mpesaConfig            MPESAConfig?
+  MPESATransaction       MPESATransactions[]
+  notifications          Notification[]
+  Payment                Payment[]
+  PaymentLink            PaymentLink[]
+  Receipt                Receipt[]
+  SMS                    SMS[]
+  smsConfig              SMSConfig?
+  Task                   Task[]
+  tenantInvoices         TenantInvoice[]
+  tenantPayments         TenantPayment[]
+  Unit                   Unit[]
+  users                  User[]
+  UserActivity           UserActivity[]
+  WaterConsumption       WaterConsumption[]
+  powerConsumption       powerConsumption[]
 }
 
-
-// Add this to your existing schema
 model TenantInvoice {
-  id              String          @id @default(uuid())
-  tenantId        Int             // Links to the tenant
-  invoicePeriod   DateTime        // The billing period (e.g., Feb 2025)
-  invoiceNumber   String          @unique // Unique identifier for the invoice
-  invoiceAmount   Float           // Amount due (e.g., monthlyCharge)
-  status          InvoiceStatus   @default(UNPAID) // Payment status
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  amountPaid      Float           @default(0) // Tracks payments made toward this invoice
-
-  // Relationships
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  payments        TenantPayment[] // Link to payments made for this invoice
+  id            String          @id @default(uuid())
+  tenantId      Int
+  invoicePeriod DateTime
+  invoiceNumber String          @unique
+  invoiceAmount Float
+  status        InvoiceStatus   @default(UNPAID)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  amountPaid    Float           @default(0)
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments      TenantPayment[]
 }
 
-// Model to track payments made toward TenantInvoices
 model TenantPayment {
-  id              String          @id @default(uuid())
-  tenantInvoiceId String          // Links to the specific tenant invoice
-  tenantId        Int             // Links to the tenant
-  amount          Float           // Amount paid
-  modeOfPayment   ModeOfPayment   // e.g., MPESA, CASH
-  transactionId   String?         @unique // Unique ID from payment provider (e.g., MPESA TransID)
-  createdAt       DateTime        @default(now())
-
-  // Relationships
-  tenantInvoice   TenantInvoice   @relation(fields: [tenantInvoiceId], references: [id], onDelete: Cascade)
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id              String        @id @default(uuid())
+  tenantInvoiceId String
+  tenantId        Int
+  amount          Float
+  modeOfPayment   ModeOfPayment
+  transactionId   String?       @unique
+  createdAt       DateTime      @default(now())
+  tenant          Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenantInvoice   TenantInvoice @relation(fields: [tenantInvoiceId], references: [id], onDelete: Cascade)
 }
 
-// Update the Tenant model to include TenantInvoices and TenantPayments
-
-// Enum for tenant status
-enum TenantStatus {
-  ACTIVE
-  DISABLED
-}
-
-// User model with roles and permissions
 model User {
-  id                  Int       @id @default(autoincrement())
-  tenantId            Int       // Tenant to which the user belongs
-  firstName           String
-  lastName            String
-  email               String    @unique
-  phoneNumber         String    @unique
-              
-
-  gender                String?
-  county                String?
-  town                  String?
-  password            String
+  id                   Int                    @id @default(autoincrement())
+  tenantId             Int
+  firstName            String
+  lastName             String
+  email                String                 @unique
+  phoneNumber          String                 @unique
+  gender               String?
+  county               String?
+  town                 String?
+  password             String
   role                 String[]
-  customPermissions   Json?     // Custom permissions (optional)
-  createdBy           Int?      // User who created this account
-  status              UserStatus @default(ACTIVE)
-  mfaEnabled          Boolean   @default(false)
-
-
-  lastLogin           DateTime    // Stores last login time
-  loginCount          Int @default(0) // Tracks login frequency
-
-
-  // Added fields for OTP reset
-  resetCode           String?   // Stores hashed OTP
-  resetCodeExpiresAt  DateTime? // OTP expiry time
-  otpAttempts         Int       @default(0) // Tracks failed attempts
-  // Relationships
-  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdUsers        User[]    @relation("CreatedUsers")
-
-  userActivities      UserActivity[]
-  notifications       Notification[]
-
-  createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
-
-  User User[] @relation("CreatedUsers")
-
-  AuditLog AuditLog[]
-
-  
-
-  TaskAssignee TaskAssignee[]
-
-  Task Task[]
-
+  customPermissions    Json?
+  createdBy            Int?
+  status               UserStatus             @default(ACTIVE)
+  mfaEnabled           Boolean                @default(false)
+  lastLogin            DateTime
+  loginCount           Int                    @default(0)
+  resetCode            String?
+  resetCodeExpiresAt   DateTime?
+  otpAttempts          Int                    @default(0)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  AbnormalWaterReading AbnormalWaterReading[]
+  AuditLog             AuditLog[]
+  Building             Building[]
+  notifications        Notification[]
+  Task                 Task[]
+  TaskAssignee         TaskAssignee[]
+  tenant               Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  userActivities       UserActivity[]
+  WaterConsumption     WaterConsumption[]
+  powerConsumption     powerConsumption[]
+  User_A               User[]                 @relation("CreatedUsers")
+  User_B               User[]                 @relation("CreatedUsers")
 }
-
 
 model UserActivity {
-  id          Int       @id @default(autoincrement())
-  userId      Int
-  tenantId    Int
-  customerId  String?   // Optional: Links to the customer affected by the action
-  action      String    // e.g., 'LOGIN', 'LOGOUT', 'VIEW', 'ADDED_CUSTOMER', 'UPDATED_CUSTOMER'
-  timestamp   DateTime  @default(now())
-   details     Json?     // Stores changed fields and their old/new values
-
-  // Relationships
-  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  id         Int       @id @default(autoincrement())
+  userId     Int
+  action     String
+  timestamp  DateTime  @default(now())
+  tenantId   Int
+  customerId String?
+  details    Json?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+  tenant     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([userId])
   @@index([customerId])
 }
 
-
-
-
-// Enum for user status
-enum UserStatus {
-  ACTIVE
-  DISABLED
-}
-
-
-
 model AuditLog {
-  id          String       @id @default(uuid())
+  id          String    @id @default(uuid())
   tenantId    Int
   userId      Int
-  customerId  String?      // Optional: Links to the customer affected by the action
-  action      String       // e.g., 'CREATE', 'UPDATE', 'DELETE', 'POST'
-  resource    String       // e.g., 'CUSTOMER', 'INVOICE', 'PAYMENT'
-  details     Json?        // Additional action details (e.g., changed fields)
-  description String?      // Human-readable description
-  createdAt   DateTime     @default(now())
-
-  // Relationships
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  action      String
+  resource    String
+  details     Json?
+  description String?
+  createdAt   DateTime  @default(now())
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id])
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([customerId])
   @@index([tenantId])
   @@index([userId])
   @@index([action])
-
 }
 
-// SMS Configuration model defined per tenant
 model SMSConfig {
-  id         Int      @id @default(autoincrement())
-  tenantId   Int      @unique
-  partnerId  String
-  apiKey     String
-  shortCode  String
+  id                         Int      @id @default(autoincrement())
+  tenantId                   Int      @unique
+  partnerId                  String
+  apiKey                     String
+  shortCode                  String
   customerSupportPhoneNumber String
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
-
-
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  tenant                     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
 
-// MPESA Configuration model defined per tenant
 model MPESAConfig {
-  id          Int      @id @default(autoincrement())
-  tenantId    Int      @unique
-  shortCode   String @unique
-  name        String
-  apiKey      String
-  passKey     String
- 
-  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-
+  id               Int                 @id @default(autoincrement())
+  tenantId         Int                 @unique
+  shortCode        String              @unique
+  name             String
+  apiKey           String
+  passKey          String
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  secretKey        String              @default("uuid()")
+  tenant           Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   MPESATransaction MPESATransactions[]
 }
 
 model Landlord {
-  id                String           @id @default(uuid())
-  tenantId          Int              // Links to tenant for multi-tenant app
-  firstName         String
-  lastName          String
-  email             String?          @unique
-  phoneNumber       String           @unique
-  status            LandlordStatus   @default(ACTIVE)
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
-
-  tenant            Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  buildings         Building[]
+  id          String         @id @default(uuid())
+  tenantId    Int
+  firstName   String
+  lastName    String
+  email       String?        @unique
+  phoneNumber String         @unique
+  status      LandlordStatus @default(ACTIVE)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  buildings   Building[]
+  tenant      Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
   @@index([phoneNumber])
@@ -294,117 +200,111 @@ model Landlord {
 }
 
 model Building {
-  id                         String    @id @default(uuid())
-  tenantId                   Int
-  landlordId                 String
-  name                       String
-  address                    String?
-  unitCount                  Int?
-  gasRate                    Float?
-  waterRate                  Float?
-  allowWaterBillingWithAverages Boolean @default(false)
-  allowGasBillingWithAverages Boolean @default(false) // New field for gas billing
-  billWater                  Boolean @default(false)
-  billGas                    Boolean @default(false)
-  billServiceCharge          Boolean @default(false)
-  billGarbage                Boolean @default(false)
-  billSecurity               Boolean @default(false)
-  billAmenities              Boolean @default(false)
-  billBackupGenerator        Boolean @default(false)
-  createdAt                  DateTime  @default(now())
-  updatedAt                  DateTime  @updatedAt
-  tenant                     Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  landlord                   Landlord  @relation(fields: [landlordId], references: [id], onDelete: Cascade)
-  units                      Unit[]
-  Customer                   Customer[]
+  id                            String     @id @default(uuid())
+  tenantId                      Int
+  landlordId                    String
+  name                          String
+  address                       String?
+  unitCount                     Int?
+  createdAt                     DateTime   @default(now())
+  updatedAt                     DateTime   @updatedAt
+  gasRate                       Float?
+  waterRate                     Float?
+  allowWaterBillingWithAverages Boolean    @default(false)
+  billAmenities                 Boolean    @default(false)
+  billBackupGenerator           Boolean    @default(false)
+  billGarbage                   Boolean    @default(false)
+  billGas                       Boolean    @default(false)
+  billSecurity                  Boolean    @default(false)
+  billServiceCharge             Boolean    @default(false)
+  billWater                     Boolean    @default(false)
+  allowGasBillingWithAverages   Boolean    @default(false)
+  managementRate                Float?
+  billType                      BillType   @default(FULL)
+  caretakerId                   Int?
+  billPower                     Boolean    @default(false)
+  User                          User?      @relation(fields: [caretakerId], references: [id])
+  landlord                      Landlord   @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  tenant                        Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  units                         Unit[]
+  Customer                      Customer[] @relation("BuildingToCustomer")
+
   @@index([tenantId])
   @@index([landlordId])
 }
 
-
 model CustomerUnit {
-  id          String    @id @default(uuid())
-  customerId  String
-  unitId      String
-  isActive    Boolean   @default(true)
-  startDate   DateTime  @default(now())
-  endDate     DateTime?
-  
-  customer    Customer  @relation(fields: [customerId], references: [id])
-  unit        Unit      @relation(fields: [unitId], references: [id])
+  id         String    @id @default(uuid())
+  customerId String
+  unitId     String
+  isActive   Boolean   @default(true)
+  startDate  DateTime  @default(now())
+  endDate    DateTime?
+  customer   Customer  @relation(fields: [customerId], references: [id])
+  unit       Unit      @relation(fields: [unitId], references: [id])
 
   @@unique([customerId, unitId, isActive], name: "customer_unit_active_unique")
 }
 
-// Enum for landlord status
-enum LandlordStatus {
-  ACTIVE
-  INACTIVE
-}
-
-
 model Unit {
-  id                 String          @id @default(uuid())
-  tenantId           Int             // Links to tenant
-  buildingId         String          // Links to building
-  unitNumber         String          // e.g., "A12"
-  monthlyCharge      Float           // Monthly rent for this unit
-  depositAmount      Float           // Deposit required for this unit
-  garbageCharge      Float?          // Optional fixed monthly garbage fee
-  serviceCharge      Float?          // Optional fixed monthly service charge
-  securityCharge     Float?          // Optional fixed monthly security charge
-  amenitiesCharge    Float?          // Optional fixed monthly amenities charge
-  backupGeneratorCharge Float?       // Optional fixed monthly backup generator charge
-  status             UnitStatus      @default(VACANT) // e.g., VACANT, OCCUPIED
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  building           Building        @relation(fields: [buildingId], references: [id], onDelete: Cascade)
-  customers          Customer[]      // Customers assigned to this unit
+  id                    String         @id @default(uuid())
+  tenantId              Int
+  buildingId            String
+  unitNumber            String
+  monthlyCharge         Float          @default(0)
+  depositAmount         Float          @default(0)
+  garbageCharge         Float?
+  serviceCharge         Float?
+  status                UnitStatus     @default(VACANT)
+  createdAt             DateTime       @default(now())
+  updatedAt             DateTime       @updatedAt
+  amenitiesCharge       Float?
+  backupGeneratorCharge Float?
+  securityCharge        Float?
+  customers             Customer[]
+  CustomerUnit          CustomerUnit[]
+  Invoice               Invoice[]
+  building              Building       @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  tenant                Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
   @@index([tenantId])
   @@index([buildingId])
   @@index([unitNumber])
-  Invoice            Invoice[]
-               
-  CustomerUnit CustomerUnit[]
 }
-
-
-enum UnitStatus {
-  VACANT      // Unit is not occupied
-  OCCUPIED    // Unit is occupied by a customer
-  MAINTENANCE
-  OCCUPIED_PENDING_PAYMENT
-}
-
-
 
 model Customer {
-  id                    String           @id @default(uuid())
-  tenantId              Int
-  unitId                String?          // Links to unit (optional if not assigned)
-  firstName             String
-  lastName              String
-  email                 String?
-  phoneNumber           String           @unique
-  secondaryPhoneNumber  String?
-  nationalId            String?          @unique
-  status                CustomerStatus   @default(ACTIVE)
-  closingBalance        Float            @default(0)
-  createdAt             DateTime         @default(now())
-  updatedAt             DateTime         @updatedAt
-   leaseFileUrl        String?
-  leaseStartDate       DateTime?
+  id                   String                 @id @default(uuid())
+  tenantId             Int
+  firstName            String
+  lastName             String
+  email                String?
+  phoneNumber          String                 @unique
+  status               CustomerStatus         @default(ACTIVE)
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  closingBalance       Float                  @default(0)
+  secondaryPhoneNumber String?
+  nationalId           String?                @unique
+  unitId               String?
   leaseEndDate         DateTime?
-  tenant                Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  unit                  Unit?            @relation(fields: [unitId], references: [id], onDelete: SetNull)
-  invoices              Invoice[]
-  payments              Payment[]
-  deposits              Deposit[]
-  taskAssignees         TaskAssignee[]
-  gasConsumptions       GasConsumption[]
-  waterConsumptions     WaterConsumption[]
-  receipts              Receipt[]
+  leaseFileUrl         String?
+  leaseStartDate       DateTime?
+  AbnormalWaterReading AbnormalWaterReading[]
+  AuditLog             AuditLog[]
+  tenant               Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unit                 Unit?                  @relation(fields: [unitId], references: [id])
+  CustomerUnit         CustomerUnit[]
+  deposits             Deposit[]
+  gasConsumptions      GasConsumption[]
+  invoices             Invoice[]
+  LeaseTermination     LeaseTermination[]
+  PaymentLink          PaymentLink[]
+  receipts             Receipt[]
+  UserActivity         UserActivity[]
+  waterConsumptions    WaterConsumption[]
+  powerConsumption     powerConsumption[]
+  Building             Building[]             @relation("BuildingToCustomer")
+  taskAssignees        TaskAssignee[]         @relation("CustomerToTaskAssignee")
 
   @@index([tenantId])
   @@index([unitId])
@@ -412,125 +312,327 @@ model Customer {
   @@index([email])
   @@index([nationalId])
   @@index([status])
-  Building Building[]
-  LeaseTermination LeaseTermination[]
-  AuditLog AuditLog[]
-  UserActivity UserActivity[]
-  CustomerUnit CustomerUnit[]
 }
 
-  model Deposit {
-  id              String          @id @default(uuid())
-  tenantId        Int             // Links to the tenant
-  customerId      String          // Links to the customer
-  invoiceId       String?         // Links to the invoice that billed the deposit
-  amount          Float           // Deposit amount
-  status          DepositStatus   @default(ACTIVE) // e.g., ACTIVE, REFUNDED, FORFEITED
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  refundedAt      DateTime?       // When the deposit was refunded
-  refundAmount    Float?          // Amount refunded (after deductions)
-  deductionReason String?         // Reason for deductions (e.g., damages)
-  refundTransactionId String?     @unique // Links to refund transaction (if any)
+model Deposit {
+  id                  String        @id @default(uuid())
+  tenantId            Int
+  customerId          String
+  invoiceId           String?
+  amount              Float
+  status              DepositStatus @default(ACTIVE)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  refundedAt          DateTime?
+  refundAmount        Float?
+  deductionReason     String?
+  refundTransactionId String?       @unique
+  customer            Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  invoice             Invoice?      @relation(fields: [invoiceId], references: [id])
+  tenant              Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
 
-  // Relationships
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer        Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  invoice         Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+model GasConsumption {
+  id          String   @id @default(uuid())
+  customerId  String
+  period      DateTime
+  consumption Float
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  reading     Float
+  tenantId    Int
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, period])
+}
+
+model WaterConsumption {
+  id                   String                 @id @default(uuid())
+  customerId           String
+  period               DateTime
+  consumption          Float
+  createdAt            DateTime               @default(now())
+  updatedAt            DateTime               @updatedAt
+  reading              Float
+  tenantId             Int
+  meterPhotoUrl        String?
+  readById             Int?
+  Invoice              Invoice[]
+  customer             Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  User                 User?                  @relation(fields: [readById], references: [id])
+  tenant               Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  AbnormalWaterReading AbnormalWaterReading[] @relation("AbnormalWaterReadingToWaterConsumption")
+
+  @@index([customerId, period])
+}
+
+model Invoice {
+  id                 String             @id @default(uuid())
+  tenantId           Int
+  customerId         String
+  invoicePeriod      DateTime
+  invoiceNumber      String             @unique
+  status             InvoiceStatus      @default(UNPAID)
+  createdAt          DateTime           @default(now())
+  amountPaid         Float              @default(0)
+  updatedAt          DateTime           @updatedAt
+  closingBalance     Float              @default(0)
+  invoiceAmount      Float
+  createdBy          String
+  isSystemGenerated  Boolean
+  unitId             String?
+  invoiceType        InvoiceType
+  waterConsumptionId String?
+  Deposit            Deposit[]
+  customer           Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tenant             Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unit               Unit?              @relation(fields: [unitId], references: [id])
+  WaterConsumption   WaterConsumption?  @relation(fields: [waterConsumptionId], references: [id])
+  InvoiceItem        InvoiceItem[]
+  ReceiptInvoice     ReceiptInvoice[]   @relation("InvoiceReceipts")
+  payments           Payment[]          @relation("InvoiceToPayment")
+  powerConsumption   powerConsumption[] @relation("InvoiceTopowerConsumption")
+  LeaseTermination   LeaseTermination[] @relation("TerminationInvoices")
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@index([unitId])
+  @@index([invoiceNumber])
+}
+
+model InvoiceItem {
+  id          String  @id @default(uuid())
+  invoiceId   String
+  description String
+  amount      Float
+  quantity    Int
+  invoice     Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+}
+
+model Payment {
+  id            String        @id @default(uuid())
+  tenantId      Int
+  amount        Float
+  modeOfPayment ModeOfPayment
+  transactionId String        @unique
+  createdAt     DateTime      @default(now())
+  firstName     String?
+  receiptId     String?
+  receipted     Boolean       @default(false)
+  ref           String?
+  customerId    String
+  tenant        Tenant        @relation(fields: [tenantId], references: [id])
+  receipt       Receipt?
+  Invoice       Invoice[]     @relation("InvoiceToPayment")
+}
+
+model Receipt {
+  id              String           @id @default(uuid())
+  tenantId        Int
+  receiptNumber   String           @unique
+  amount          Float
+  modeOfPayment   ModeOfPayment
+  paidBy          String?
+  transactionCode String?
+  phoneNumber     String?
+  paymentId       String           @unique
+  customerId      String
+  createdAt       DateTime         @default(now())
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  payment         Payment          @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  tenant          Tenant           @relation(fields: [tenantId], references: [id])
+  receiptInvoices ReceiptInvoice[] @relation("InvoiceReceipts")
+}
+
+model ReceiptInvoice {
+  id        String  @id @default(uuid())
+  receiptId String
+  invoiceId String
+  invoice   Invoice @relation("InvoiceReceipts", fields: [invoiceId], references: [id], onDelete: Cascade)
+  receipt   Receipt @relation("InvoiceReceipts", fields: [receiptId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  tenantId  Int
+  userId    Int
+  message   String
+  type      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model SMS {
+  id          String   @id @default(uuid())
+  tenantId    Int
+  clientsmsid String   @unique
+  mobile      String
+  message     String
+  status      String
+  createdAt   DateTime @default(now())
+  tenant      Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model MPESATransactions {
+  id            String      @id @default(uuid())
+  tenantId      Int
+  TransID       String      @unique
+  TransTime     DateTime
+  ShortCode     String
+  TransAmount   Float
+  BillRefNumber String
+  MSISDN        String
+  FirstName     String
+  processed     Boolean     @default(false)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  mpesaConfig   MPESAConfig @relation(fields: [ShortCode], references: [shortCode], onDelete: Cascade)
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+}
+
+model Task {
+  id            Int            @id @default(autoincrement())
+  tenantId      Int
+  createdBy     Int
+  type          TaskType
+  status        TaskStatus     @default(PENDING)
+  declaredBags  Int?
+  remainingBags Int?
+  assignedAt    DateTime?
+  startedAt     DateTime?
+  completedAt   DateTime?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  creator       User           @relation(fields: [createdBy], references: [id], onDelete: Cascade)
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  taskAssignees TaskAssignee[]
+
+  @@index([tenantId])
+}
+
+model TaskAssignee {
+  id         Int        @id @default(autoincrement())
+  taskId     Int
+  assigneeId Int
+  assignedAt DateTime   @default(now())
+  assignee   User       @relation(fields: [assigneeId], references: [id], onDelete: Cascade)
+  task       Task       @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  Customer   Customer[] @relation("CustomerToTaskAssignee")
+
+  @@unique([taskId, assigneeId])
+}
+
+model LeaseTermination {
+  id              String    @id @default(uuid())
+  customerId      String
+  tenantId        Int
+  stage           String
+  terminationDate DateTime?
+  reason          String?
+  notes           String?
+  media           Json[]
+  damages         Json[]
+  vacatedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  customer        Customer  @relation(fields: [customerId], references: [id])
+  tenant          Tenant    @relation(fields: [tenantId], references: [id])
+  invoices        Invoice[] @relation("TerminationInvoices")
+}
+
+model AbnormalWaterReading {
+  id               String                @id
+  tenantId         Int
+  reviewed         Boolean               @default(false)
+  reviewNotes      String?
+  action           AbnormalReviewAction?
+  resolved         Boolean               @default(false)
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime
+  consumption      Float
+  customerId       String
+  meterPhotoUrl    String?
+  period           DateTime
+  readById         Int?
+  reading          Float
+  Customer         Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  User             User?                 @relation(fields: [readById], references: [id])
+  Tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  WaterConsumption WaterConsumption[]    @relation("AbnormalWaterReadingToWaterConsumption")
+}
+
+model PaymentLink {
+  id                Int      @id @default(autoincrement())
+  token             String   @unique
+  tenantId          Int
+  customerId        String
+  expiresAt         DateTime
+  createdAt         DateTime @default(now())
+  paid              Boolean  @default(false)
+  merchantRequestId String?  @unique
+  checkoutRequestId String?  @unique
+  Customer          Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  Tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+}
+
+model powerConsumption {
+  id            String    @id
+  customerId    String
+  tenantId      Int
+  readById      Int?
+  period        DateTime
+  reading       Float
+  consumption   Float
+  meterPhotoUrl String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime
+  Customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  User          User?     @relation(fields: [readById], references: [id])
+  Tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  Invoice       Invoice[] @relation("InvoiceTopowerConsumption")
+
+  @@index([customerId, period])
+}
+
+enum TenantStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum LandlordStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum UnitStatus {
+  VACANT
+  OCCUPIED
+  MAINTENANCE
+  OCCUPIED_PENDING_PAYMENT
 }
 
 enum DepositStatus {
-  ACTIVE        // Deposit is held
-  REFUNDED      // Deposit fully or partially refunded
-  FORFEITED     // Deposit not refunded due to damages or other reasons
+  ACTIVE
+  REFUNDED
+  FORFEITED
 }
 
-
-// GasConsumption model
-model GasConsumption {
-  id            String    @id @default(uuid())
-  customerId    String
-  period        DateTime  // e.g., "2025-02-01"
-   reading       Float     // Current meter reading 
-  consumption   Float     // e.g., 10 cubic meters
-
-tenantId     Int
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-
-  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@index([customerId, period])
-}
-
-// WaterConsumption model
-model WaterConsumption {
-  id            String    @id @default(uuid())
-  customerId    String
-  tenantId     Int
-  period        DateTime  // e.g., "2025-02-01"
-  reading       Float     // Current meter reading in liters
-  consumption   Float     // Calculated: current reading - previous reading
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  @@index([customerId, period])
-}
-// Enum for customer status
 enum CustomerStatus {
   ACTIVE
   INACTIVE
   PENDING
 }
 
-// Invoice model for customer billing
-
-// Invoice model
-model Invoice {
-  id                 String          @id @default(uuid())
-  tenantId           Int
-  customerId         String
-  unitId             String?         // Now optional
-  invoicePeriod      DateTime
-  invoiceNumber      String          @unique
-  invoiceAmount      Float
-  amountPaid         Float           @default(0)
-  status             InvoiceStatus
-  closingBalance     Float           @default(0)
-  isSystemGenerated  Boolean
-  createdBy          String
-  createdAt          DateTime        @default(now())
-  updatedAt          DateTime        @updatedAt
-  tenant             Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer           Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  unit               Unit?           @relation(fields: [unitId], references: [id], onDelete: SetNull)
-  InvoiceItem        InvoiceItem[]
-  payments           Payment[]
-  @@index([tenantId])
-  @@index([customerId])
-  @@index([unitId])
-  @@index([invoiceNumber])
-  Deposit Deposit[]
-  ReceiptInvoice ReceiptInvoice[] @relation("InvoiceReceipts")
-  LeaseTermination LeaseTermination[] @relation("TerminationInvoices")
-}
-
-// InvoiceItem model
-model InvoiceItem {
-  id          String   @id @default(uuid())
-  invoiceId   String
-  description String
-  amount      Float
-  quantity    Int
-
-  invoice     Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-}
-
-
-
-// Enum for invoice status
 enum InvoiceStatus {
   UNPAID
   PAID
@@ -538,183 +640,12 @@ enum InvoiceStatus {
   CANCELLED
 }
 
-// Payment model for customer payments
-model Payment {
-  id             String      @id @default(uuid())
-  tenantId       Int
-  amount         Float
-  modeOfPayment  ModeOfPayment
-  firstName      String?
-  receipted      Boolean     @default(false)
-  transactionId  String     @unique 
-  ref            String?  
-  receiptId       String?
-
-  receipt        Receipt?    
-  createdAt      DateTime    @default(now()) 
-   tenant  Tenant @relation(fields: [tenantId],references: [id])
-
-  Invoice Invoice[]
-
-  Customer Customer[]
-}
-
-// Enum for payment methods
 enum ModeOfPayment {
   CASH
   MPESA
   BANK_TRANSFER
   CREDIT_CARD
   DEBIT_CARD
-}
-
-
-
-
-
-
-
-
-
-// Receipt model
-model Receipt {
-  id             String      @id @default(uuid())
-
-  tenantId        Int
- 
-  receiptNumber  String      @unique 
-  amount         Float
-  modeOfPayment  ModeOfPayment
-  paidBy         String?
-  transactionCode String?
-  phoneNumber    String?
-  paymentId      String @unique 
-
-  payment        Payment? @relation(fields: [paymentId], references: [id], onDelete: Cascade)   
-  receiptInvoices ReceiptInvoice[] @relation("InvoiceReceipts")
-  customer       Customer    @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  
-  tenant  Tenant @relation(fields: [tenantId],references: [id])
-  customerId     String
-  createdAt      DateTime    @default(now())
-}
-
-
-
-// ReceiptInvoice model
-model ReceiptInvoice {
-  id          String      @id @default(uuid())
-  receiptId   String
-  invoiceId   String
-
-  receipt     Receipt?     @relation("InvoiceReceipts", fields: [receiptId], references: [id], onDelete: Cascade)
-  invoice     Invoice?     @relation("InvoiceReceipts", fields: [invoiceId], references: [id], onDelete: Cascade)
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Notification model for user alerts and notifications
-model Notification {
-  id          String       @id @default(uuid())
-  tenantId    Int
-  userId      Int
-  message     String
-  type        String    // e.g., 'ALERT', 'REMINDER'
-  read        Boolean   @default(false)
-  createdAt   DateTime  @default(now())
-
-  // Relationships
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
-  user        User      @relation(fields: [userId], references: [id])
-}
-
-// User Activity model for tracking user actions
-
-
-
-model SMS {
-  id           String   @id @default(uuid())
-  tenantId     Int
-  clientsmsid  String   @unique
-  mobile       String
-  message      String
-  status       String
-  createdAt    DateTime @default(now())
-
-  // Relationship
-  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-}
-
-
-model MPESATransactions {
-  id             String     @id @default(uuid())
-  tenantId       Int
-  TransID        String   @unique
-  TransTime      DateTime
-  ShortCode      String
-  TransAmount    Float
-  BillRefNumber  String
-  MSISDN         String
-  FirstName      String
-  processed      Boolean  @default(false)
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-
-  tenant         Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  mpesaConfig    MPESAConfig @relation(fields: [ShortCode], references: [shortCode], onDelete: Cascade)
-}
-
-
-
-
-
-
-model Task {
-  id              Int            @id @default(autoincrement())
-  tenantId        Int            // Tenant to which the task belongs
-  createdBy       Int            // User who created the task
-  type            TaskType       // Type of task (e.g., BAG_ISSUANCE, PAYMENT_COLLECTION)
-  status          TaskStatus     @default(PENDING) // Task status
-  declaredBags    Int?           
-  remainingBags   Int?
-  assignedAt      DateTime?      // When the task was assigned
-  startedAt       DateTime?      // When the task was started
-  completedAt     DateTime?      // When the task was completed
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
-
-  // Relationships
-  tenant          Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  creator         User           @relation(fields: [createdBy], references: [id], onDelete: Cascade)
-  taskAssignees   TaskAssignee[] // Users assigned to this task
-
-  @@index([tenantId]) // Index for tenant-level filtering
-
-}
-
-model TaskAssignee {
-  id         Int      @id @default(autoincrement())
-  taskId     Int      // Task ID
-  assigneeId Int      // User ID of the assignee
-  assignedAt DateTime @default(now()) // When the user was assigned the task
-
-  // Relationships
-  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
-  assignee   User     @relation(fields: [assigneeId], references: [id], onDelete: Cascade)
-  
-  @@unique([taskId, assigneeId]) // Ensure a user cannot be assigned the same task multiple times
-
-  Customer Customer[]
 }
 
 enum TaskType {
@@ -731,22 +662,18 @@ enum TaskStatus {
   CANCELED
 }
 
-
-model LeaseTermination {
-  id              String        @id @default(uuid())
-  customerId      String
-  tenantId        Int
-  stage           String        // e.g., "DETAILS", "MEDIA", "DAMAGES", "INVOICES", "VACATED"
-  terminationDate DateTime?
-  reason          String?
-  notes           String?
-  media           Json[]        // Array of { url: string, type: "photo" | "video" }
-  damages         Json[]        // Array of { description: string, notes: string, media: Json[] }
-  invoices        Invoice[]     @relation("TerminationInvoices")
-  vacatedAt       DateTime?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
-  customer        Customer      @relation(fields: [customerId], references: [id])
-  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+enum AbnormalReviewAction {
+  REQUEST_READING
+  DISCUSS_CONSUMPTION
+  METER_MAINTENANCE
 }
 
+enum BillType {
+  FULL
+  WATER_ONLY
+}
+
+enum InvoiceType {
+  RENT_PLUS
+  WATER
+}

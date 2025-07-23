@@ -28,6 +28,15 @@ CREATE TYPE "TaskType" AS ENUM ('BAG_ISSUANCE', 'PAYMENT_COLLECTION', 'CUSTOMER_
 -- CreateEnum
 CREATE TYPE "TaskStatus" AS ENUM ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELED');
 
+-- CreateEnum
+CREATE TYPE "AbnormalReviewAction" AS ENUM ('REQUEST_READING', 'DISCUSS_CONSUMPTION', 'METER_MAINTENANCE');
+
+-- CreateEnum
+CREATE TYPE "BillType" AS ENUM ('FULL', 'WATER_ONLY');
+
+-- CreateEnum
+CREATE TYPE "InvoiceType" AS ENUM ('RENT_PLUS', 'WATER');
+
 -- CreateTable
 CREATE TABLE "Tenant" (
     "id" SERIAL NOT NULL,
@@ -114,10 +123,10 @@ CREATE TABLE "User" (
 CREATE TABLE "UserActivity" (
     "id" SERIAL NOT NULL,
     "userId" INTEGER NOT NULL,
-    "tenantId" INTEGER NOT NULL,
-    "customerId" TEXT,
     "action" TEXT NOT NULL,
     "timestamp" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "tenantId" INTEGER NOT NULL,
+    "customerId" TEXT,
     "details" JSONB,
 
     CONSTRAINT "UserActivity_pkey" PRIMARY KEY ("id")
@@ -128,12 +137,12 @@ CREATE TABLE "AuditLog" (
     "id" TEXT NOT NULL,
     "tenantId" INTEGER NOT NULL,
     "userId" INTEGER NOT NULL,
-    "customerId" TEXT,
     "action" TEXT NOT NULL,
     "resource" TEXT NOT NULL,
     "details" JSONB,
     "description" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "customerId" TEXT,
 
     CONSTRAINT "AuditLog_pkey" PRIMARY KEY ("id")
 );
@@ -162,6 +171,7 @@ CREATE TABLE "MPESAConfig" (
     "passKey" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "secretKey" TEXT NOT NULL DEFAULT 'uuid()',
 
     CONSTRAINT "MPESAConfig_pkey" PRIMARY KEY ("id")
 );
@@ -189,19 +199,23 @@ CREATE TABLE "Building" (
     "name" TEXT NOT NULL,
     "address" TEXT,
     "unitCount" INTEGER,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     "gasRate" DOUBLE PRECISION,
     "waterRate" DOUBLE PRECISION,
     "allowWaterBillingWithAverages" BOOLEAN NOT NULL DEFAULT false,
-    "allowGasBillingWithAverages" BOOLEAN NOT NULL DEFAULT false,
-    "billWater" BOOLEAN NOT NULL DEFAULT false,
-    "billGas" BOOLEAN NOT NULL DEFAULT false,
-    "billServiceCharge" BOOLEAN NOT NULL DEFAULT false,
-    "billGarbage" BOOLEAN NOT NULL DEFAULT false,
-    "billSecurity" BOOLEAN NOT NULL DEFAULT false,
     "billAmenities" BOOLEAN NOT NULL DEFAULT false,
     "billBackupGenerator" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "billGarbage" BOOLEAN NOT NULL DEFAULT false,
+    "billGas" BOOLEAN NOT NULL DEFAULT false,
+    "billSecurity" BOOLEAN NOT NULL DEFAULT false,
+    "billServiceCharge" BOOLEAN NOT NULL DEFAULT false,
+    "billWater" BOOLEAN NOT NULL DEFAULT false,
+    "allowGasBillingWithAverages" BOOLEAN NOT NULL DEFAULT false,
+    "managementRate" DOUBLE PRECISION,
+    "billType" "BillType" NOT NULL DEFAULT 'FULL',
+    "caretakerId" INTEGER,
+    "billPower" BOOLEAN NOT NULL DEFAULT false,
 
     CONSTRAINT "Building_pkey" PRIMARY KEY ("id")
 );
@@ -224,16 +238,16 @@ CREATE TABLE "Unit" (
     "tenantId" INTEGER NOT NULL,
     "buildingId" TEXT NOT NULL,
     "unitNumber" TEXT NOT NULL,
-    "monthlyCharge" DOUBLE PRECISION NOT NULL,
-    "depositAmount" DOUBLE PRECISION NOT NULL,
+    "monthlyCharge" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "depositAmount" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "garbageCharge" DOUBLE PRECISION,
     "serviceCharge" DOUBLE PRECISION,
-    "securityCharge" DOUBLE PRECISION,
-    "amenitiesCharge" DOUBLE PRECISION,
-    "backupGeneratorCharge" DOUBLE PRECISION,
     "status" "UnitStatus" NOT NULL DEFAULT 'VACANT',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "amenitiesCharge" DOUBLE PRECISION,
+    "backupGeneratorCharge" DOUBLE PRECISION,
+    "securityCharge" DOUBLE PRECISION,
 
     CONSTRAINT "Unit_pkey" PRIMARY KEY ("id")
 );
@@ -242,20 +256,20 @@ CREATE TABLE "Unit" (
 CREATE TABLE "Customer" (
     "id" TEXT NOT NULL,
     "tenantId" INTEGER NOT NULL,
-    "unitId" TEXT,
     "firstName" TEXT NOT NULL,
     "lastName" TEXT NOT NULL,
     "email" TEXT,
     "phoneNumber" TEXT NOT NULL,
-    "secondaryPhoneNumber" TEXT,
-    "nationalId" TEXT,
     "status" "CustomerStatus" NOT NULL DEFAULT 'ACTIVE',
-    "closingBalance" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "closingBalance" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "secondaryPhoneNumber" TEXT,
+    "nationalId" TEXT,
+    "unitId" TEXT,
+    "leaseEndDate" TIMESTAMP(3),
     "leaseFileUrl" TEXT,
     "leaseStartDate" TIMESTAMP(3),
-    "leaseEndDate" TIMESTAMP(3),
 
     CONSTRAINT "Customer_pkey" PRIMARY KEY ("id")
 );
@@ -283,11 +297,11 @@ CREATE TABLE "GasConsumption" (
     "id" TEXT NOT NULL,
     "customerId" TEXT NOT NULL,
     "period" TIMESTAMP(3) NOT NULL,
-    "reading" DOUBLE PRECISION NOT NULL,
     "consumption" DOUBLE PRECISION NOT NULL,
-    "tenantId" INTEGER NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "reading" DOUBLE PRECISION NOT NULL,
+    "tenantId" INTEGER NOT NULL,
 
     CONSTRAINT "GasConsumption_pkey" PRIMARY KEY ("id")
 );
@@ -296,12 +310,14 @@ CREATE TABLE "GasConsumption" (
 CREATE TABLE "WaterConsumption" (
     "id" TEXT NOT NULL,
     "customerId" TEXT NOT NULL,
-    "tenantId" INTEGER NOT NULL,
     "period" TIMESTAMP(3) NOT NULL,
-    "reading" DOUBLE PRECISION NOT NULL,
     "consumption" DOUBLE PRECISION NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "reading" DOUBLE PRECISION NOT NULL,
+    "tenantId" INTEGER NOT NULL,
+    "meterPhotoUrl" TEXT,
+    "readById" INTEGER,
 
     CONSTRAINT "WaterConsumption_pkey" PRIMARY KEY ("id")
 );
@@ -311,17 +327,19 @@ CREATE TABLE "Invoice" (
     "id" TEXT NOT NULL,
     "tenantId" INTEGER NOT NULL,
     "customerId" TEXT NOT NULL,
-    "unitId" TEXT,
     "invoicePeriod" TIMESTAMP(3) NOT NULL,
     "invoiceNumber" TEXT NOT NULL,
-    "invoiceAmount" DOUBLE PRECISION NOT NULL,
-    "amountPaid" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "status" "InvoiceStatus" NOT NULL,
-    "closingBalance" DOUBLE PRECISION NOT NULL DEFAULT 0,
-    "isSystemGenerated" BOOLEAN NOT NULL,
-    "createdBy" TEXT NOT NULL,
+    "status" "InvoiceStatus" NOT NULL DEFAULT 'UNPAID',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "amountPaid" DOUBLE PRECISION NOT NULL DEFAULT 0,
     "updatedAt" TIMESTAMP(3) NOT NULL,
+    "closingBalance" DOUBLE PRECISION NOT NULL DEFAULT 0,
+    "invoiceAmount" DOUBLE PRECISION NOT NULL,
+    "createdBy" TEXT NOT NULL,
+    "isSystemGenerated" BOOLEAN NOT NULL,
+    "unitId" TEXT,
+    "invoiceType" "InvoiceType" NOT NULL,
+    "waterConsumptionId" TEXT,
 
     CONSTRAINT "Invoice_pkey" PRIMARY KEY ("id")
 );
@@ -343,12 +361,13 @@ CREATE TABLE "Payment" (
     "tenantId" INTEGER NOT NULL,
     "amount" DOUBLE PRECISION NOT NULL,
     "modeOfPayment" "ModeOfPayment" NOT NULL,
-    "firstName" TEXT,
-    "receipted" BOOLEAN NOT NULL DEFAULT false,
     "transactionId" TEXT NOT NULL,
-    "ref" TEXT,
-    "receiptId" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "firstName" TEXT,
+    "receiptId" TEXT,
+    "receipted" BOOLEAN NOT NULL DEFAULT false,
+    "ref" TEXT,
+    "customerId" TEXT NOT NULL,
 
     CONSTRAINT "Payment_pkey" PRIMARY KEY ("id")
 );
@@ -470,6 +489,57 @@ CREATE TABLE "LeaseTermination" (
 );
 
 -- CreateTable
+CREATE TABLE "AbnormalWaterReading" (
+    "id" TEXT NOT NULL,
+    "tenantId" INTEGER NOT NULL,
+    "reviewed" BOOLEAN NOT NULL DEFAULT false,
+    "reviewNotes" TEXT,
+    "action" "AbnormalReviewAction",
+    "resolved" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "consumption" DOUBLE PRECISION NOT NULL,
+    "customerId" TEXT NOT NULL,
+    "meterPhotoUrl" TEXT,
+    "period" TIMESTAMP(3) NOT NULL,
+    "readById" INTEGER,
+    "reading" DOUBLE PRECISION NOT NULL,
+
+    CONSTRAINT "AbnormalWaterReading_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PaymentLink" (
+    "id" SERIAL NOT NULL,
+    "token" TEXT NOT NULL,
+    "tenantId" INTEGER NOT NULL,
+    "customerId" TEXT NOT NULL,
+    "expiresAt" TIMESTAMP(3) NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "paid" BOOLEAN NOT NULL DEFAULT false,
+    "merchantRequestId" TEXT,
+    "checkoutRequestId" TEXT,
+
+    CONSTRAINT "PaymentLink_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "powerConsumption" (
+    "id" TEXT NOT NULL,
+    "customerId" TEXT NOT NULL,
+    "tenantId" INTEGER NOT NULL,
+    "readById" INTEGER,
+    "period" TIMESTAMP(3) NOT NULL,
+    "reading" DOUBLE PRECISION NOT NULL,
+    "consumption" DOUBLE PRECISION NOT NULL,
+    "meterPhotoUrl" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "powerConsumption_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "_CreatedUsers" (
     "A" INTEGER NOT NULL,
     "B" INTEGER NOT NULL,
@@ -483,14 +553,6 @@ CREATE TABLE "_BuildingToCustomer" (
     "B" TEXT NOT NULL,
 
     CONSTRAINT "_BuildingToCustomer_AB_pkey" PRIMARY KEY ("A","B")
-);
-
--- CreateTable
-CREATE TABLE "_CustomerToPayment" (
-    "A" TEXT NOT NULL,
-    "B" TEXT NOT NULL,
-
-    CONSTRAINT "_CustomerToPayment_AB_pkey" PRIMARY KEY ("A","B")
 );
 
 -- CreateTable
@@ -510,11 +572,27 @@ CREATE TABLE "_InvoiceToPayment" (
 );
 
 -- CreateTable
+CREATE TABLE "_InvoiceTopowerConsumption" (
+    "A" TEXT NOT NULL,
+    "B" TEXT NOT NULL,
+
+    CONSTRAINT "_InvoiceTopowerConsumption_AB_pkey" PRIMARY KEY ("A","B")
+);
+
+-- CreateTable
 CREATE TABLE "_TerminationInvoices" (
     "A" TEXT NOT NULL,
     "B" TEXT NOT NULL,
 
     CONSTRAINT "_TerminationInvoices_AB_pkey" PRIMARY KEY ("A","B")
+);
+
+-- CreateTable
+CREATE TABLE "_AbnormalWaterReadingToWaterConsumption" (
+    "A" TEXT NOT NULL,
+    "B" TEXT NOT NULL,
+
+    CONSTRAINT "_AbnormalWaterReadingToWaterConsumption_AB_pkey" PRIMARY KEY ("A","B")
 );
 
 -- CreateIndex
@@ -662,13 +740,25 @@ CREATE INDEX "Task_tenantId_idx" ON "Task"("tenantId");
 CREATE UNIQUE INDEX "TaskAssignee_taskId_assigneeId_key" ON "TaskAssignee"("taskId", "assigneeId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "PaymentLink_token_key" ON "PaymentLink"("token");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PaymentLink_merchantRequestId_key" ON "PaymentLink"("merchantRequestId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PaymentLink_checkoutRequestId_key" ON "PaymentLink"("checkoutRequestId");
+
+-- CreateIndex
+CREATE INDEX "PaymentLink_customerId_idx" ON "PaymentLink"("customerId");
+
+-- CreateIndex
+CREATE INDEX "powerConsumption_customerId_period_idx" ON "powerConsumption"("customerId", "period");
+
+-- CreateIndex
 CREATE INDEX "_CreatedUsers_B_index" ON "_CreatedUsers"("B");
 
 -- CreateIndex
 CREATE INDEX "_BuildingToCustomer_B_index" ON "_BuildingToCustomer"("B");
-
--- CreateIndex
-CREATE INDEX "_CustomerToPayment_B_index" ON "_CustomerToPayment"("B");
 
 -- CreateIndex
 CREATE INDEX "_CustomerToTaskAssignee_B_index" ON "_CustomerToTaskAssignee"("B");
@@ -677,19 +767,28 @@ CREATE INDEX "_CustomerToTaskAssignee_B_index" ON "_CustomerToTaskAssignee"("B")
 CREATE INDEX "_InvoiceToPayment_B_index" ON "_InvoiceToPayment"("B");
 
 -- CreateIndex
+CREATE INDEX "_InvoiceTopowerConsumption_B_index" ON "_InvoiceTopowerConsumption"("B");
+
+-- CreateIndex
 CREATE INDEX "_TerminationInvoices_B_index" ON "_TerminationInvoices"("B");
+
+-- CreateIndex
+CREATE INDEX "_AbnormalWaterReadingToWaterConsumption_B_index" ON "_AbnormalWaterReadingToWaterConsumption"("B");
 
 -- AddForeignKey
 ALTER TABLE "TenantInvoice" ADD CONSTRAINT "TenantInvoice_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TenantPayment" ADD CONSTRAINT "TenantPayment_tenantInvoiceId_fkey" FOREIGN KEY ("tenantInvoiceId") REFERENCES "TenantInvoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "TenantPayment" ADD CONSTRAINT "TenantPayment_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "TenantPayment" ADD CONSTRAINT "TenantPayment_tenantInvoiceId_fkey" FOREIGN KEY ("tenantInvoiceId") REFERENCES "TenantInvoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "User" ADD CONSTRAINT "User_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "UserActivity" ADD CONSTRAINT "UserActivity_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "UserActivity" ADD CONSTRAINT "UserActivity_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -698,16 +797,13 @@ ALTER TABLE "UserActivity" ADD CONSTRAINT "UserActivity_tenantId_fkey" FOREIGN K
 ALTER TABLE "UserActivity" ADD CONSTRAINT "UserActivity_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "UserActivity" ADD CONSTRAINT "UserActivity_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "SMSConfig" ADD CONSTRAINT "SMSConfig_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -719,10 +815,13 @@ ALTER TABLE "MPESAConfig" ADD CONSTRAINT "MPESAConfig_tenantId_fkey" FOREIGN KEY
 ALTER TABLE "Landlord" ADD CONSTRAINT "Landlord_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Building" ADD CONSTRAINT "Building_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Building" ADD CONSTRAINT "Building_caretakerId_fkey" FOREIGN KEY ("caretakerId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Building" ADD CONSTRAINT "Building_landlordId_fkey" FOREIGN KEY ("landlordId") REFERENCES "Landlord"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Building" ADD CONSTRAINT "Building_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "CustomerUnit" ADD CONSTRAINT "CustomerUnit_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -731,10 +830,10 @@ ALTER TABLE "CustomerUnit" ADD CONSTRAINT "CustomerUnit_customerId_fkey" FOREIGN
 ALTER TABLE "CustomerUnit" ADD CONSTRAINT "CustomerUnit_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Unit" ADD CONSTRAINT "Unit_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Unit" ADD CONSTRAINT "Unit_buildingId_fkey" FOREIGN KEY ("buildingId") REFERENCES "Building"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Unit" ADD CONSTRAINT "Unit_buildingId_fkey" FOREIGN KEY ("buildingId") REFERENCES "Building"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Unit" ADD CONSTRAINT "Unit_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Customer" ADD CONSTRAINT "Customer_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -743,34 +842,40 @@ ALTER TABLE "Customer" ADD CONSTRAINT "Customer_tenantId_fkey" FOREIGN KEY ("ten
 ALTER TABLE "Customer" ADD CONSTRAINT "Customer_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Deposit" ADD CONSTRAINT "Deposit_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "Deposit" ADD CONSTRAINT "Deposit_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Deposit" ADD CONSTRAINT "Deposit_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "GasConsumption" ADD CONSTRAINT "GasConsumption_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Deposit" ADD CONSTRAINT "Deposit_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "GasConsumption" ADD CONSTRAINT "GasConsumption_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "GasConsumption" ADD CONSTRAINT "GasConsumption_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "WaterConsumption" ADD CONSTRAINT "WaterConsumption_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "WaterConsumption" ADD CONSTRAINT "WaterConsumption_readById_fkey" FOREIGN KEY ("readById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "WaterConsumption" ADD CONSTRAINT "WaterConsumption_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_unitId_fkey" FOREIGN KEY ("unitId") REFERENCES "Unit"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Invoice" ADD CONSTRAINT "Invoice_waterConsumptionId_fkey" FOREIGN KEY ("waterConsumptionId") REFERENCES "WaterConsumption"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -779,19 +884,19 @@ ALTER TABLE "InvoiceItem" ADD CONSTRAINT "InvoiceItem_invoiceId_fkey" FOREIGN KE
 ALTER TABLE "Payment" ADD CONSTRAINT "Payment_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Receipt" ADD CONSTRAINT "Receipt_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "Payment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Receipt" ADD CONSTRAINT "Receipt_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Receipt" ADD CONSTRAINT "Receipt_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Receipt" ADD CONSTRAINT "Receipt_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "Payment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Receipt" ADD CONSTRAINT "Receipt_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ReceiptInvoice" ADD CONSTRAINT "ReceiptInvoice_receiptId_fkey" FOREIGN KEY ("receiptId") REFERENCES "Receipt"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ReceiptInvoice" ADD CONSTRAINT "ReceiptInvoice_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "ReceiptInvoice" ADD CONSTRAINT "ReceiptInvoice_invoiceId_fkey" FOREIGN KEY ("invoiceId") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "ReceiptInvoice" ADD CONSTRAINT "ReceiptInvoice_receiptId_fkey" FOREIGN KEY ("receiptId") REFERENCES "Receipt"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Notification" ADD CONSTRAINT "Notification_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -803,28 +908,52 @@ ALTER TABLE "Notification" ADD CONSTRAINT "Notification_userId_fkey" FOREIGN KEY
 ALTER TABLE "SMS" ADD CONSTRAINT "SMS_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "MPESATransactions" ADD CONSTRAINT "MPESATransactions_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "MPESATransactions" ADD CONSTRAINT "MPESATransactions_ShortCode_fkey" FOREIGN KEY ("ShortCode") REFERENCES "MPESAConfig"("shortCode") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "Task" ADD CONSTRAINT "Task_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "MPESATransactions" ADD CONSTRAINT "MPESATransactions_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Task" ADD CONSTRAINT "Task_createdBy_fkey" FOREIGN KEY ("createdBy") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "TaskAssignee" ADD CONSTRAINT "TaskAssignee_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "Task"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "Task" ADD CONSTRAINT "Task_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "TaskAssignee" ADD CONSTRAINT "TaskAssignee_assigneeId_fkey" FOREIGN KEY ("assigneeId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "TaskAssignee" ADD CONSTRAINT "TaskAssignee_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "Task"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LeaseTermination" ADD CONSTRAINT "LeaseTermination_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "LeaseTermination" ADD CONSTRAINT "LeaseTermination_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AbnormalWaterReading" ADD CONSTRAINT "AbnormalWaterReading_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AbnormalWaterReading" ADD CONSTRAINT "AbnormalWaterReading_readById_fkey" FOREIGN KEY ("readById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "AbnormalWaterReading" ADD CONSTRAINT "AbnormalWaterReading_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentLink" ADD CONSTRAINT "PaymentLink_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentLink" ADD CONSTRAINT "PaymentLink_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "powerConsumption" ADD CONSTRAINT "powerConsumption_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "powerConsumption" ADD CONSTRAINT "powerConsumption_readById_fkey" FOREIGN KEY ("readById") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "powerConsumption" ADD CONSTRAINT "powerConsumption_tenantId_fkey" FOREIGN KEY ("tenantId") REFERENCES "Tenant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "_CreatedUsers" ADD CONSTRAINT "_CreatedUsers_A_fkey" FOREIGN KEY ("A") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
@@ -839,12 +968,6 @@ ALTER TABLE "_BuildingToCustomer" ADD CONSTRAINT "_BuildingToCustomer_A_fkey" FO
 ALTER TABLE "_BuildingToCustomer" ADD CONSTRAINT "_BuildingToCustomer_B_fkey" FOREIGN KEY ("B") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
-ALTER TABLE "_CustomerToPayment" ADD CONSTRAINT "_CustomerToPayment_A_fkey" FOREIGN KEY ("A") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
-ALTER TABLE "_CustomerToPayment" ADD CONSTRAINT "_CustomerToPayment_B_fkey" FOREIGN KEY ("B") REFERENCES "Payment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
-
--- AddForeignKey
 ALTER TABLE "_CustomerToTaskAssignee" ADD CONSTRAINT "_CustomerToTaskAssignee_A_fkey" FOREIGN KEY ("A") REFERENCES "Customer"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
@@ -857,7 +980,19 @@ ALTER TABLE "_InvoiceToPayment" ADD CONSTRAINT "_InvoiceToPayment_A_fkey" FOREIG
 ALTER TABLE "_InvoiceToPayment" ADD CONSTRAINT "_InvoiceToPayment_B_fkey" FOREIGN KEY ("B") REFERENCES "Payment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "_InvoiceTopowerConsumption" ADD CONSTRAINT "_InvoiceTopowerConsumption_A_fkey" FOREIGN KEY ("A") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_InvoiceTopowerConsumption" ADD CONSTRAINT "_InvoiceTopowerConsumption_B_fkey" FOREIGN KEY ("B") REFERENCES "powerConsumption"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "_TerminationInvoices" ADD CONSTRAINT "_TerminationInvoices_A_fkey" FOREIGN KEY ("A") REFERENCES "Invoice"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "_TerminationInvoices" ADD CONSTRAINT "_TerminationInvoices_B_fkey" FOREIGN KEY ("B") REFERENCES "LeaseTermination"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_AbnormalWaterReadingToWaterConsumption" ADD CONSTRAINT "_AbnormalWaterReadingToWaterConsumption_A_fkey" FOREIGN KEY ("A") REFERENCES "AbnormalWaterReading"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "_AbnormalWaterReadingToWaterConsumption" ADD CONSTRAINT "_AbnormalWaterReadingToWaterConsumption_B_fkey" FOREIGN KEY ("B") REFERENCES "WaterConsumption"("id") ON DELETE CASCADE ON UPDATE CASCADE;

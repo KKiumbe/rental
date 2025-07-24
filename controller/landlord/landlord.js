@@ -30,21 +30,7 @@ const createLandlord = async (req, res) => {
       return res.status(404).json({ message: 'Tenant not found.' });
     }
 
-    // Check if authenticated user exists and belongs to tenant
-    const currentUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, firstName: true, lastName: true, tenantId: true },
-    });
-
-    if (!currentUser) {
-      return res.status(404).json({ message: 'Authenticated user not found.' });
-    }
-
-    if (currentUser.tenantId !== tenantId) {
-      return res.status(403).json({
-        message: 'User does not belong to the specified tenant.',
-      });
-    }
+   
 
     // Check if landlord with phone/email already exists for the tenant
     const existingLandlord = await prisma.landlord.findFirst({

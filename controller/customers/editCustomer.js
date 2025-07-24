@@ -5,6 +5,35 @@ const prisma = new PrismaClient();
 
 
 
+// GET /units/:id/customers
+const getUnitCustomers = async (req, res) => {
+  const unitId = req.params.id;
+  const tenantId = req.user?.tenantId;
+
+  try {
+    const customers = await prisma.customer.findMany({
+      where: {
+        unitId,
+        tenantId,
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        phoneNumber: true,
+        status: true,
+      },
+    });
+
+    return res.status(200).json({ success: true, data: customers });
+  } catch (error) {
+    console.error('Error fetching customers for unit:', error);
+    return res.status(500).json({ success: false, message: 'Failed to fetch customers for this unit.' });
+  }
+};
+
+
 
 
 
@@ -113,4 +142,4 @@ const editCustomer = async (req, res) => {
 };
 
 
-module.exports = { editCustomer };
+module.exports = { editCustomer, getUnitCustomers };

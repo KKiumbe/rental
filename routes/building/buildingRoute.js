@@ -2,6 +2,7 @@
 const express = require('express');
 const verifyToken = require('../../middleware/verifyToken.js');
 const { createBuilding, searchBuildings, createUnit, getAllBuildings, getBuildingById, editBuilding, getUnitsByBuilding, getUnitDetailsById, editUnit ,getUnitDetails} = require('../../controller/building/building.js');
+const { getUnitCustomers } = require('../../controller/customers/editCustomer.js');
 
 //const { createBuilding, searchBuildings } = require('../../controller/building/building.js');
 
@@ -29,10 +30,13 @@ router.get('/units/:unitId', verifyToken, getUnitDetails);
 router.post('/create-unit', verifyToken, createUnit);
 
 router.put('/units/:unitId', verifyToken, editUnit);
+
+router.get('/units/:id/customers', verifyToken, getUnitCustomers);
 //router.get('/units/:buildingId', verifyToken, getUnitsByBuilding);
 //router.get('/units/:unitId', verifyToken, getUnitDetailsById);
 
 //router.put('/units/:unitId', verifyToken, editUnit);
+
 
 
 module.exports = router;

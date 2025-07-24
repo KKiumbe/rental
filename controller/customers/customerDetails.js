@@ -188,7 +188,7 @@ const getCustomerDetails = async (req, res) => {
 const deleteCustomer = async (req, res) => {
   try {
     const { id } = req.params; // Get customer ID from URL params
-    const { tenantId, user: userId } = req.user; // Get tenantId and userId from authenticated user
+    const { tenantId, userId } = req.user; // Get tenantId and userId from authenticated user
 
     if (!tenantId) {
       return res.status(400).json({ success: false, message: 'Tenant ID is required' });

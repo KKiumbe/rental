@@ -676,4 +676,5 @@ enum InvoiceType {
   RENT_PLUS
   WATER
   ONBOARDING
+  MANUAL_INVOICE
 }

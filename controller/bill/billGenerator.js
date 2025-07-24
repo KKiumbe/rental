@@ -1355,8 +1355,8 @@ const invoiceCreate = async (req, res) => {
 
   async function createInvoice(req, res) {
     const { customerId, invoiceItemsData } = req.body;
-    const tenantId = req.user?.tenantId;
-    const user = req.user?.user;
+    const {tenantId,userId,role,firstName,lastName} = req.user;
+   
   
     if (!tenantId) {
       return res.status(400).json({ error: 'Tenant ID is required' });
@@ -1383,16 +1383,7 @@ const invoiceCreate = async (req, res) => {
         return res.status(404).json({ error: 'Customer not found or does not belong to this tenant' });
       }
 
-      const currentUser = await prisma.user.findUnique({
-        where: { id: user },
-        select: { tenantId: true, firstName: true, lastName: true },
-      });
-      if (!currentUser || currentUser.tenantId !== tenantId) {
-        return res.status(404).json({
-          success: false,
-          message: 'Authenticated user not found or does not belong to tenant.',
-        });
-      }
+     
   
       const invoicePeriod = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
       const currentClosingBalance = (await getCurrentClosingBalance(customer.id)) || 0;
@@ -1429,7 +1420,10 @@ const invoiceCreate = async (req, res) => {
             invoiceAmount,
             status: invoiceStatus,
             isSystemGenerated: false,
-            createdBy: `${currentUser.firstName} ${currentUser.lastName}`,
+            createdBy: `${firstName} ${lastName}`,
+            invoiceType: InvoiceType.MANUAL_INVOICE,  // <-- corrected field name
+
+           
           },
         });
   

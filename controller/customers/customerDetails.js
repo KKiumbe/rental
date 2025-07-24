@@ -187,7 +187,7 @@ const getCustomerDetails = async (req, res) => {
 async function deleteCustomer(req, res) {
     try {
 
-      const { customerId } = req.params;
+      const { id:customerId } = req.params;
         const { userId } = req.user || {};
 
         if (!customerId || !userId) {

@@ -284,66 +284,82 @@ const editBuilding = async (req, res) => {
 
 
 
+
+
+
 const createBuilding = async (req, res) => {
-    const { tenantId } = req.user; // Extract tenantId from authenticated user
-  const {landlordId, name, address, unitCount, gasRate, waterRate } = req.body;
+  const { landlordId, name, address, unitCount, gasRate, waterRate, allowWaterBillingWithAverages, allowGasBillingWithAverages, billWater, billGas, billServiceCharge, billGarbage, billSecurity, billAmenities, billBackupGenerator, billPower, managementRate, billType, caretakerId } = req.body;
+  const { tenantId, id: userId } = req.user; // Extract tenantId and userId from authenticated user
+
+  // Validate req.user
+  if (!userId || !tenantId) {
+    return res.status(401).json({ success: false, message: 'Authenticated user ID or tenant ID is missing' });
+  }
 
   // Validate required fields
-  if (!tenantId || !landlordId || !name) {
-    return res.status(400).json({ message: 'Required fields: tenantId, landlordId, name.' });
+  if (!landlordId || !name) {
+    return res.status(400).json({ success: false, message: 'Required fields: landlordId, name' });
   }
 
   // Validate numeric fields
   if (unitCount !== undefined && (isNaN(unitCount) || unitCount < 0)) {
-    return res.status(400).json({ message: 'unitCount must be a non-negative number.' });
+    return res.status(400).json({ success: false, message: 'unitCount must be a non-negative number' });
   }
   if (gasRate !== undefined && (isNaN(gasRate) || gasRate < 0)) {
-    return res.status(400).json({ message: 'gasRate must be a non-negative number.' });
+    return res.status(400).json({ success: false, message: 'gasRate must be a non-negative number' });
   }
   if (waterRate !== undefined && (isNaN(waterRate) || waterRate < 0)) {
-    return res.status(400).json({ message: 'waterRate must be a non-negative number.' });
+    return res.status(400).json({ success: false, message: 'waterRate must be a non-negative number' });
   }
-
-  const currentUser = await prisma.user.findUnique({
-    where: { id: req.user.id },
-    select: { firstName: true, lastName: true, tenantId: true ,id:true},
-  });
-  if (!currentUser) {
-    return res.status(404).json({
-      success: false,
-      message: 'Authenticated user not found.',
-    });
+  if (managementRate !== undefined && (isNaN(managementRate) || managementRate < 0)) {
+    return res.status(400).json({ success: false, message: 'managementRate must be a non-negative number' });
   }
-  if (currentUser.tenantId !== tenantId) {
-    return res.status(403).json({
-      success: false,
-      message: 'User does not belong to the specified tenant.',
-    });
-  }
-
 
   try {
-    // Check if tenant exists
+    // Verify authenticated user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, firstName: true, lastName: true, tenantId: true, role: true },
+    });
+
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'Authenticated user not found' });
+    }
+    if (currentUser.tenantId !== tenantId) {
+      return res.status(403).json({ success: false, message: 'User does not belong to the specified tenant' });
+    }
+    // Optional: Restrict to admin users
+    if (!currentUser.role.includes('ADMIN')) {
+      return res.status(403).json({ success: false, message: 'Only admins can create buildings' });
+    }
+
+    // Verify tenant exists
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
+      select: { id: true },
     });
-
     if (!tenant) {
-      return res.status(404).json({ message: 'Tenant not found.' });
+      return res.status(404).json({ success: false, message: 'Tenant not found' });
     }
 
-    // Check if authenticated user belongs to the tenant
-    if (req.user.tenantId !== tenantId) {
-      return res.status(403).json({ message: 'User does not belong to the specified tenant.' });
-    }
-
-    // Check if landlord exists
+    // Verify landlord exists and belongs to the tenant
     const landlord = await prisma.landlord.findUnique({
       where: { id: landlordId },
+      select: { id: true, tenantId: true },
     });
-
     if (!landlord || landlord.tenantId !== tenantId) {
-      return res.status(404).json({ message: 'Landlord not found or does not belong to tenant.' });
+      return res.status(404).json({ success: false, message: 'Landlord not found or does not belong to tenant' });
+    }
+
+    // Verify caretaker (if provided)
+    if (caretakerId) {
+      const caretaker = await prisma.user.findUnique({
+        where: { id: caretakerId },
+        select: { id: true, tenantId: true },
+      });
+      if (!caretaker || caretaker.tenantId !== tenantId) {
+        return res.status(404).json({ success: false, message: 'Caretaker not found or does not belong to tenant' });
+      }
     }
 
     // Create building
@@ -352,27 +368,99 @@ const createBuilding = async (req, res) => {
         tenantId,
         landlordId,
         name,
-        address,
+        address: address || null,
         unitCount: unitCount ? parseInt(unitCount) : null,
         gasRate: gasRate ? parseFloat(gasRate) : null,
         waterRate: waterRate ? parseFloat(waterRate) : null,
+        allowWaterBillingWithAverages: allowWaterBillingWithAverages || false,
+        allowGasBillingWithAverages: allowGasBillingWithAverages || false,
+        billWater: billWater || false,
+        billGas: billGas || false,
+        billServiceCharge: billServiceCharge || false,
+        billGarbage: billGarbage || false,
+        billSecurity: billSecurity || false,
+        billAmenities: billAmenities || false,
+        billBackupGenerator: billBackupGenerator || false,
+        billPower: billPower || false,
+        managementRate: managementRate ? parseFloat(managementRate) : null,
+        billType: billType || 'FULL',
+        caretakerId: caretakerId ? parseInt(caretakerId) : null,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        landlordId: true,
+        name: true,
+        address: true,
+        unitCount: true,
+        gasRate: true,
+        waterRate: true,
+        allowWaterBillingWithAverages: true,
+        allowGasBillingWithAverages: true,
+        billWater: true,
+        billGas: true,
+        billServiceCharge: true,
+        billGarbage: true,
+        billSecurity: true,
+        billAmenities: true,
+        billBackupGenerator: true,
+        billPower: true,
+        managementRate: true,
+        billType: true,
+        caretakerId: true,
+        createdAt: true,
+        updatedAt: true,
       },
     });
 
+    // Log user activity
     await prisma.userActivity.create({
       data: {
-        user: { connect: { id: currentUser.id } },
-        tenant: { connect: { id: tenantId } },
-        
-        action: `${currentUser.firstName} CREATED BUILDING ${building.name}`,
+        userId: currentUser.id,
+        tenantId,
+        action: `CREATED BUILDING ${building.name}`,
         timestamp: new Date(),
+        details: { buildingId: building.id },
       },
     });
 
-    res.status(201).json({ message: 'Building created successfully', building });
+    res.status(201).json({
+      success: true,
+      message: 'Building created successfully',
+      data: building,
+    });
   } catch (error) {
-    console.error('Error creating building:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('Error creating building:', {
+      error: error.message,
+      stack: error.stack,
+      tenantId,
+      landlordId,
+      userId,
+    });
+
+    if (error.name === 'PrismaClientKnownRequestError') {
+      if (error.code === 'P2002') {
+        return res.status(400).json({
+          success: false,
+          message: 'A building with this name may already exist for the tenant',
+        });
+      }
+      if (error.code === 'P2025') {
+        return res.status(404).json({
+          success: false,
+          message: 'Referenced resource (e.g., landlord or caretaker) not found',
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid database request',
+        error: error.message,
+      });
+    }
+
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
   }
 };
 

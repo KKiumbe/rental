@@ -53,6 +53,8 @@ model Tenant {
   UserActivity           UserActivity[]
   WaterConsumption       WaterConsumption[]
   powerConsumption       powerConsumption[]
+
+  BuildingExpense BuildingExpense[]
 }
 
 model TenantInvoice {
@@ -116,6 +118,8 @@ model User {
   powerConsumption     powerConsumption[]
   User_A               User[]                 @relation("CreatedUsers")
   User_B               User[]                 @relation("CreatedUsers")
+
+  BuildingExpense BuildingExpense[]
 }
 
 model UserActivity {
@@ -197,6 +201,7 @@ model Landlord {
   @@index([tenantId])
   @@index([phoneNumber])
   @@index([email])
+  BuildingExpense BuildingExpense[]
 }
 
 model Building {
@@ -231,6 +236,7 @@ model Building {
 
   @@index([tenantId])
   @@index([landlordId])
+  BuildingExpense BuildingExpense[]
 }
 
 model CustomerUnit {
@@ -598,6 +604,52 @@ model powerConsumption {
 
   @@index([customerId, period])
 }
+
+
+
+model BuildingExpense {
+  id          String           @id @default(uuid())
+  tenantId    Int
+  buildingId  String
+  landlordId  String
+  expenseType BuildingExpenseType
+  amount      Float
+  description String
+  date        DateTime         @default(now())
+  status      ExpenseStatus    @default(PENDING)
+  approvedBy  Int?
+  approvedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+  
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  building    Building         @relation(fields: [buildingId], references: [id], onDelete: Cascade)
+  landlord    Landlord         @relation(fields: [landlordId], references: [id], onDelete: Cascade)
+  approver    User?            @relation(fields: [approvedBy], references: [id])
+
+  @@index([tenantId])
+  @@index([buildingId])
+  @@index([landlordId])
+}
+
+
+
+enum BuildingExpenseType {
+  REPAIR
+  MAINTENANCE
+  RENOVATION
+  UTILITY
+  OTHER
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  
+}
+
+
 
 enum TenantStatus {
   ACTIVE

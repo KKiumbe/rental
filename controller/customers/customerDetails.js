@@ -191,7 +191,10 @@ async function deleteCustomer(req, res) {
     const { userId } = req.user || {};
 
     if (!customerId || !userId) {
-      return res.status(400).json({ success: false, message: 'Missing required parameters: customerId and userId' });
+      return res.status(400).json({
+        success: false,
+        message: 'Missing required parameters: customerId and userId'
+      });
     }
 
     const customer = await prisma.customer.findUnique({
@@ -206,7 +209,6 @@ async function deleteCustomer(req, res) {
       return res.status(404).json({ success: false, message: 'Customer not found' });
     }
 
-    // Transaction
     await prisma.$transaction(async (tx) => {
       await tx.paymentLink.deleteMany({ where: { customerId } });
 
@@ -253,7 +255,31 @@ async function deleteCustomer(req, res) {
         });
       }
 
+      // Get all units linked to this customer
+      const customerUnits = await tx.customerUnit.findMany({
+        where: { customerId },
+        select: { unitId: true }
+      });
+
+      // Delete customer-unit relationships
       await tx.customerUnit.deleteMany({ where: { customerId } });
+
+      // Mark those units as VACANT if no other active customers remain
+      for (const { unitId } of customerUnits) {
+        const activeOccupants = await tx.customerUnit.count({
+          where: {
+            unitId,
+            isActive: true
+          }
+        });
+
+        if (activeOccupants === 0) {
+          await tx.unit.update({
+            where: { id: unitId },
+            data: { status: 'VACANT' }
+          });
+        }
+      }
 
       const buildings = await tx.building.findMany({
         where: { Customer: { some: { id: customerId } } },
@@ -267,6 +293,7 @@ async function deleteCustomer(req, res) {
         });
       }
 
+      // Handle unitId field in Customer model
       if (customer.unitId) {
         const unitOccupants = await tx.customerUnit.count({
           where: { unitId: customer.unitId, isActive: true }
@@ -300,7 +327,10 @@ async function deleteCustomer(req, res) {
       });
     });
 
-    return res.status(200).json({ success: true, message: 'Customer deleted successfully' });
+    return res.status(200).json({
+      success: true,
+      message: 'Customer deleted successfully'
+    });
 
   } catch (error) {
     console.error('Error in deleteCustomer:', error);
@@ -313,7 +343,11 @@ async function deleteCustomer(req, res) {
       });
     }
 
-    return res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message
+    });
   } finally {
     await prisma.$disconnect();
   }

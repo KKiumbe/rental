@@ -3,6 +3,7 @@ const express = require('express');
 const verifyToken = require('../../middleware/verifyToken.js');
 const { createBuilding, searchBuildings, createUnit, getAllBuildings, getBuildingById, editBuilding, getUnitsByBuilding, getUnitDetailsById, editUnit ,getUnitDetails} = require('../../controller/building/building.js');
 const { getUnitCustomers } = require('../../controller/customers/editCustomer.js');
+const { createExpense, approveExpense } = require('../../controller/building/expenses.js');
 
 //const { createBuilding, searchBuildings } = require('../../controller/building/building.js');
 
@@ -25,7 +26,7 @@ router.get('/buildings', verifyToken, getAllBuildings);
 router.put('/buildings/:buildingId', verifyToken, editBuilding);
  
 //units route
-router.get('/units/:unitId', verifyToken, getUnitDetails);
+router.get('/units/:id', verifyToken, getUnitDetails);
 
 router.post('/create-unit', verifyToken, createUnit);
 
@@ -37,7 +38,11 @@ router.get('/building-units/:buildingId', verifyToken, getUnitsByBuilding);
 
 //router.put('/units/:unitId', verifyToken, editUnit);
 
+router.post('/building-expenses', verifyToken, createExpense);
 
+//approve expense
+
+router.post('/approve-expense/:expenseId', verifyToken, approveExpense);
 
 module.exports = router;
 

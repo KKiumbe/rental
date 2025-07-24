@@ -43,7 +43,7 @@ const prisma = new PrismaClient();
 
 const getBuildingById = async (req, res) => {
   const tenantId = req.user?.tenantId;
-  const { buildingId:id } = req.params;
+  const { buildingId: id } = req.params;
 
   if (!tenantId) {
     return res.status(400).json({ message: 'Tenant ID is required' });
@@ -57,7 +57,7 @@ const getBuildingById = async (req, res) => {
     const building = await prisma.building.findUnique({
       where: {
         id,
-        tenantId, // Ensure building belongs to tenant
+        tenantId,
       },
       select: {
         id: true,
@@ -77,8 +77,6 @@ const getBuildingById = async (req, res) => {
         billSecurity: true,
         billAmenities: true,
         billBackupGenerator: true,
-      
-     
         createdAt: true,
         updatedAt: true,
         landlord: {
@@ -103,24 +101,29 @@ const getBuildingById = async (req, res) => {
             status: true,
             createdAt: true,
             updatedAt: true,
-            customers: {
+            CustomerUnit: {
+              where: { isActive: true },
               select: {
-                id: true,
-                firstName: true,
-                lastName: true,
-                email: true,
-                phoneNumber: true,
-                secondaryPhoneNumber: true,
-                nationalId: true,
-                status: true,
-                closingBalance: true,
-                leaseFileUrl: true,
-                createdAt: true,
-                updatedAt: true,
+                customer: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    email: true,
+                    phoneNumber: true,
+                    secondaryPhoneNumber: true,
+                    nationalId: true,
+                    status: true,
+                    closingBalance: true,
+                    leaseFileUrl: true,
+                    createdAt: true,
+                    updatedAt: true,
+                  },
+                },
               },
             },
           },
-          orderBy: { unitNumber: 'asc' }, // Sort units for consistency
+          orderBy: { unitNumber: 'asc' },
         },
       },
     });
@@ -129,7 +132,6 @@ const getBuildingById = async (req, res) => {
       return res.status(404).json({ message: 'Building not found' });
     }
 
-    // Format response
     const formattedBuilding = {
       ...building,
       buildingName: building.name,
@@ -141,9 +143,10 @@ const getBuildingById = async (req, res) => {
         : null,
       units: building.units.map((unit) => ({
         ...unit,
-        customerCount: unit.customers.length,
+        customers: unit.CustomerUnit.map((cu) => cu.customer),
+        customerCount: unit.CustomerUnit.length,
       })),
-      customerCount: building.units.reduce((sum, unit) => sum + unit.customers.length, 0),
+      customerCount: building.units.reduce((sum, unit) => sum + unit.CustomerUnit.length, 0),
     };
 
     res.status(200).json(formattedBuilding);
@@ -157,6 +160,7 @@ const getBuildingById = async (req, res) => {
     await prisma.$disconnect();
   }
 };
+
 
 
 
@@ -813,7 +817,7 @@ const searchBuildings = async (req, res) => {
 
 
 const getUnitDetails = async (req, res) => {
-  const { unitId:id } = req.params;
+  const { id } = req.params;
   const { tenantId } = req.user; // Assuming tenantId is available from authentication middleware
 
   if (!tenantId) {

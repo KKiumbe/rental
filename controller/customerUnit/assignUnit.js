@@ -90,10 +90,17 @@ async function assignUnitToCustomer(req, res) {
 
 
 
-async function getCustomerUnits(customerId) {
+async function getCustomerUnits(req,res) {
     try {
+        
+        const { id: customerId } = req.params;
+        const { userId } = req.user || {};
+
         if (!customerId) {
-            throw new Error('customerId is required');
+            return res.status(400).json({ message: 'Missing customerId' });
+        }
+        if(!userId){
+            return res.status(401).json({ message: 'Not authorized' });
         }
 
         const customerUnits = await prisma.customerUnit.findMany({
@@ -111,6 +118,8 @@ async function getCustomerUnits(customerId) {
                 isActive: 'desc', // Active units first
             },
         });
+
+        res.status(200).json(customerUnits);
 
         return customerUnits;
     } catch (error) {

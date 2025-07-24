@@ -23,7 +23,7 @@ const InvoiceStatus = {
 const createWaterReading = async (req, res) => {
   const { sendSMS } = require('../sms/sms.js');
   const { customerId, reading, meterPhotoUrl } = req.body;
-  const { tenantId, user: userId } = req.user;
+  const { tenantId,  userId } = req.user;
   const now = new Date();
   const period = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, -3)); // EAT month start
 
@@ -60,16 +60,6 @@ const createWaterReading = async (req, res) => {
 
 
 
-    const currentUser = await prisma.user.findUnique({
-            where: { id: userId },
-            select: { tenantId: true, firstName: true, lastName: true },
-          });
-          if (!currentUser || currentUser.tenantId !== tenantId) {
-            return res.status(404).json({
-              success: false,
-              message: 'Authenticated user not found or does not belong to tenant.',
-            });
-          }
 
     // Use unit.building (prefer over Customer.Building)
     let building = customer.unit?.building;

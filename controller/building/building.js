@@ -1271,7 +1271,7 @@ const getUnitsByBuilding = async (req, res) => {
         tenantId,
       },
       orderBy: {
-        name: 'asc',
+        unitNumber: 'asc', // ✅ Valid field
       },
     });
 
@@ -1281,6 +1281,8 @@ const getUnitsByBuilding = async (req, res) => {
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
+
 
 
 

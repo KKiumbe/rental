@@ -179,76 +179,114 @@ module.exports = register;
 const signin = async (req, res) => {
   const { phoneNumber, password } = req.body;
 
+  // Input validation
+  if (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim() === '') {
+    return res.status(400).json({ success: false, message: 'Phone number is required' });
+  }
+  if (!password || typeof password !== 'string' || password.trim() === '') {
+    return res.status(400).json({ success: false, message: 'Password is required' });
+  }
+
   try {
     // Find the user by phone number
     const user = await prisma.user.findUnique({
-      where: { phoneNumber },
-      include: {
-        tenant: true, // Include tenant details to confirm association, remove if unnecessary
+      where: { phoneNumber: phoneNumber.trim() },
+      select: {
+        id: true,
+        phoneNumber: true,
+        password: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        tenantId: true,
+        role: true,
+        status: true,
+        tenant: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     });
 
-    // Check if user exists
+    // Check if user exists and is active
     if (!user) {
-      return res.status(401).json({ message: 'Invalid phone number or password' });
+      return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
+    }
+    if (user.status !== 'ACTIVE') {
+      return res.status(403).json({ success: false, message: 'User account is disabled' });
     }
 
-    // Compare the provided password with the hashed password in the database
+    // Compare the provided password with the hashed password
     const isPasswordValid = await bcrypt.compare(password, user.password);
-
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid phone number or password' });
+      return res.status(401).json({ success: false, message: 'Invalid phone number or password' });
     }
 
-
+    // Update lastLogin and loginCount
     await prisma.user.update({
       where: { id: user.id },
       data: {
         lastLogin: new Date(),
-        loginCount: { increment: 1 }, // Increase login count
+        loginCount: { increment: 1 },
       },
     });
 
     // Log the login action
-    // await prisma.userActivity.create({
-    //   data: {
-    //     userId: user.id,
-    //     action: "LOGIN",
-    //   },
-    // });
-
-
-
-    // Generate a JWT token with the necessary claims
-    const token = jwt.sign(
-      { 
-        id: user.id, 
-        phoneNumber: user.phoneNumber, 
-        role: user.role, 
-        tenantId: user.tenantId 
+    await prisma.userActivity.create({
+      data: {
+        userId: user.id,
+        tenantId: user.tenantId,
+        action: 'LOGIN',
+        timestamp: new Date(),
+        details: { message: `User ${user.firstName} ${user.lastName} logged in` },
       },
-      process.env.JWT_SECRET,
-      { expiresIn: '1d' } // Token expires in 1 day
-    );
-
-    // Set the token in an HTTP-only cookie for security
-    res.cookie('token', token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production', // Use secure cookies in production
-      maxAge: 24 * 60 * 60 * 1000, // Cookie expires in 1 day
     });
 
-    // Exclude the password from the response and send user info
+    // Generate a JWT token
+    const token = jwt.sign(
+      {
+        id: user.id,
+        phoneNumber: user.phoneNumber,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        email: user.email,
+        role: user.role,
+        tenantId: user.tenantId,
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: '1d' }
+    );
+
+    // Set the token in an HTTP-only cookie
+    res.cookie('token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Adjust for cross-origin
+      maxAge: 24 * 60 * 60 * 1000, // 1 day
+    });
+
+    // Exclude sensitive fields from response
     const { password: userPassword, ...userInfo } = user;
 
-    // Optionally, send back user-related info, depending on the application needs
-    res.status(200).json({ message: 'Login successful', user: userInfo });
-
+    res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      user: userInfo,
+    });
   } catch (error) {
-    console.error('Error logging in:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    console.error('Error logging in:', {
+      error: error.message,
+      stack: error.stack,
+      phoneNumber,
+    });
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
   }
 };
+
 
 
 

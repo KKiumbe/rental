@@ -27,6 +27,8 @@ router.put('/buildings/:buildingId', verifyToken, editBuilding);
 router.get('/units/:unitId', verifyToken, getUnitDetails);
 
 router.post('/create-unit', verifyToken, createUnit);
+
+router.put('/units/:unitId', verifyToken, editUnit);
 //router.get('/units/:buildingId', verifyToken, getUnitsByBuilding);
 //router.get('/units/:unitId', verifyToken, getUnitDetailsById);
 

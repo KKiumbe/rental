@@ -62,14 +62,14 @@ const createLandlord = async (req, res) => {
     });
 
     // Log user activity
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: userId } },
-        tenant: { connect: { id: tenantId } },
-        action: `added landlord by ${req.user.firstName} ${req.user.lastName}`,
-        timestamp: new Date(),
-      },
-    });
+    // await prisma.userActivity.create({
+    //   data: {
+    //     user: { connect: { id: userId } },
+    //     tenant: { connect: { id: tenantId } },
+    //     action: `added landlord by ${req.user.firstName} ${req.user.lastName}`,
+    //     timestamp: new Date(),
+    //   },
+    // });
 
     return res.status(201).json({
       success: true,

@@ -1256,4 +1256,33 @@ const editUnit = async (req, res) => {
 
 
 
-module.exports = { createBuilding, searchBuildings,assignUnitToCustomer, createUnit, getAllBuildings, getBuildingById, editBuilding ,getUnitDetails,editUnit};
+const getUnitsByBuilding = async (req, res) => {
+  const { buildingId } = req.params;
+  const tenantId = req.user?.tenantId;
+
+  if (!buildingId) {
+    return res.status(400).json({ message: 'Building ID is required' });
+  }
+
+  try {
+    const units = await prisma.unit.findMany({
+      where: {
+        buildingId,
+        tenantId,
+      },
+      orderBy: {
+        name: 'asc',
+      },
+    });
+
+    res.status(200).json({ data: units });
+  } catch (error) {
+    console.error('Error fetching units by building:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
+
+
+module.exports = { createBuilding, searchBuildings,assignUnitToCustomer, createUnit, getAllBuildings, getBuildingById, editBuilding ,getUnitDetails,editUnit,getUnitsByBuilding};

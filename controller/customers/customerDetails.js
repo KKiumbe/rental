@@ -184,110 +184,195 @@ const getCustomerDetails = async (req, res) => {
 
 
 
+async function deleteCustomer(req, res) {
+    try {
 
+      const { customerId } = req.params;
+        const { userId } = req.user || {};
 
-const deleteCustomer = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { tenantId, userId } = req.user;
+        if (!customerId || !userId) {
+            throw new Error('Missing required parameters: customerId and userId are required');
+        }
 
-    if (!tenantId) {
-      return res.status(400).json({ success: false, message: 'Tenant ID is required' });
-    }
-
-    if (!userId) {
-      return res.status(400).json({ success: false, message: 'User ID is required' });
-    }
-
-    const result = await prisma.$transaction(
-      async (tx) => {
-        const customer = await tx.customer.findFirst({
-          where: {
-            id,
-            tenantId,
-          },
-          select: {
-            id: true,
-            unitId: true,
-            firstName: true,
-            lastName: true,
-          },
+        // First, get the customer to verify existence and get tenantId
+        const customer = await prisma.customer.findUnique({
+            where: { id: customerId },
+            include: {
+                // Include minimal relations needed for deletion
+                CustomerUnit: true,
+                unit: true // For potential unit status update
+            }
         });
 
         if (!customer) {
-          throw new Error('Customer not found');
+            throw new Error('Customer not found');
         }
 
-        const currentUser = await tx.user.findUnique({
-          where: { id: userId },
-          select: { tenantId: true, firstName: true, lastName: true, id: true },
+        // Start transaction - this is crucial for data integrity
+        const result = await prisma.$transaction(async (tx) => {
+            // 1. Delete all payment links first (simple relation)
+            await tx.paymentLink.deleteMany({
+                where: { customerId }
+            });
+
+            // 2. Delete receipts and related records
+            const receipts = await tx.receipt.findMany({
+                where: { customerId },
+                select: { id: true, paymentId: true }
+            });
+
+            for (const receipt of receipts) {
+                // Delete receipt invoices first
+                await tx.receiptInvoice.deleteMany({
+                    where: { receiptId: receipt.id }
+                });
+
+                // Delete the receipt
+                await tx.receipt.delete({
+                    where: { id: receipt.id }
+                });
+
+                // Delete the associated payment
+                await tx.payment.delete({
+                    where: { id: receipt.paymentId }
+                });
+            }
+
+            // 3. Handle invoices and related records
+            const invoices = await tx.invoice.findMany({
+                where: { customerId },
+                select: { id: true }
+            });
+
+            for (const invoice of invoices) {
+                // Delete invoice items
+                await tx.invoiceItem.deleteMany({
+                    where: { invoiceId: invoice.id }
+                });
+
+                // Delete receipt invoices (if any remain)
+                await tx.receiptInvoice.deleteMany({
+                    where: { invoiceId: invoice.id }
+                });
+
+                // Delete power consumption records linked to invoice
+                await tx.powerConsumption.updateMany({
+                    where: { Invoice: { some: { id: invoice.id } } },
+                    data: { Invoice: { disconnect: { id: invoice.id } } }
+                });
+
+                // Delete lease terminations linked to invoice
+                await tx.leaseTermination.updateMany({
+                    where: { invoices: { some: { id: invoice.id } } },
+                    data: { invoices: { disconnect: { id: invoice.id } } }
+                });
+
+                // Finally delete the invoice
+                await tx.invoice.delete({
+                    where: { id: invoice.id }
+                });
+            }
+
+            // 4. Delete deposits
+            await tx.deposit.deleteMany({
+                where: { customerId }
+            });
+
+            // 5. Delete consumption records
+            await tx.gasConsumption.deleteMany({
+                where: { customerId }
+            });
+
+            await tx.waterConsumption.deleteMany({
+                where: { customerId }
+            });
+
+            await tx.powerConsumption.deleteMany({
+                where: { customerId }
+            });
+
+            await tx.abnormalWaterReading.deleteMany({
+                where: { customerId }
+            });
+
+            // 6. Delete lease terminations
+            await tx.leaseTermination.deleteMany({
+                where: { customerId }
+            });
+
+            // 7. Handle task assignees (many-to-many relation)
+            await tx.taskAssignee.updateMany({
+                where: { Customer: { some: { id: customerId } } },
+                data: { Customer: { disconnect: { id: customerId } } }
+            });
+
+            // 8. Delete customer-unit relationships
+            await tx.customerUnit.deleteMany({
+                where: { customerId }
+            });
+
+            // 9. Update any buildings that reference this customer
+            await tx.building.updateMany({
+                where: { Customer: { some: { id: customerId } } },
+                data: { Customer: { disconnect: { id: customerId } } }
+            });
+
+            // 10. Update unit status if this customer was the only occupant
+            if (customer.unitId) {
+                const unitOccupants = await tx.customerUnit.count({
+                    where: { unitId: customer.unitId, isActive: true }
+                });
+
+                if (unitOccupants === 0) {
+                    await tx.unit.update({
+                        where: { id: customer.unitId },
+                        data: { status: 'VACANT' }
+                    });
+                }
+            }
+
+            // 11. Delete audit logs referencing this customer
+            await tx.auditLog.deleteMany({
+                where: { customerId }
+            });
+
+            // 12. Delete user activities referencing this customer
+            await tx.userActivity.deleteMany({
+                where: { customerId }
+            });
+
+            // Finally, delete the customer
+            const deletedCustomer = await tx.customer.delete({
+                where: { id: customerId }
+            });
+
+            // Create audit log for the deletion
+            await tx.auditLog.create({
+                data: {
+                    tenantId: customer.tenantId,
+                    userId: userId,
+                    action: 'CUSTOMER_DELETION',
+                    resource: 'Customer',
+                    details: JSON.stringify({
+                        customerId,
+                        customerName: `${customer.firstName} ${customer.lastName}`,
+                        deletedAt: new Date()
+                    }),
+                }
+            });
+
+            return deletedCustomer;
         });
 
-        if (!currentUser || currentUser.tenantId !== tenantId) {
-          throw new Error('User does not belong to the specified tenant');
-        }
-
-        // Deactivate or delete associated CustomerUnit assignments
-        await tx.customerUnit.updateMany({
-          where: {
-            customerId: id,
-            isActive: true,
-          },
-          data: {
-            isActive: false,
-            endDate: new Date(),
-          },
-        });
-
-        // Optional: delete those records entirely (if preferred over soft delete)
-        // await tx.customerUnit.deleteMany({ where: { customerId: id } });
-
-        // Mark unit as VACANT if needed
-        if (customer.unitId) {
-          await tx.unit.update({
-            where: { id: customer.unitId },
-            data: { status: 'VACANT' },
-          });
-        }
-
-        await tx.userActivity.create({
-          data: {
-            user: { connect: { id: currentUser.id } },
-            tenant: { connect: { id: tenantId } },
-            action: `${customer.firstName} ${customer.lastName} DELETED by ${currentUser.firstName} ${currentUser.lastName}`,
-            details: { customerId: customer.id },
-            timestamp: new Date(),
-          },
-        });
-
-        // Delete the customer
-        await tx.customer.delete({
-          where: { id },
-        });
-
-        return { message: 'Customer deleted successfully' };
-      },
-      { timeout: 10000 }
-    );
-
-    res.status(200).json({ success: true, message: result.message });
-  } catch (error) {
-    console.error('Error deleting customer:', error);
-
-    if (error.message === 'Customer not found' || error.code === 'P2025') {
-      return res.status(404).json({ success: false, message: 'Customer not found' });
+        return result;
+    } catch (error) {
+        console.error('Error in deleteCustomer:', error);
+        throw error;
+    } finally {
+        await prisma.$disconnect();
     }
+}
 
-    if (error.code === 'P2028') {
-      return res.status(500).json({
-        success: false,
-        message: 'Transaction timed out. Please try again or contact support.',
-      });
-    }
-
-    res.status(500).json({ success: false, message: 'Internal server error', error: error.message });
-  }
-};
 
 
 

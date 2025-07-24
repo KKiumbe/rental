@@ -305,7 +305,7 @@ const createBuilding = async (req, res) => {
   }
 
   const currentUser = await prisma.user.findUnique({
-    where: { id: user },
+    where: { id: req.user.id },
     select: { firstName: true, lastName: true, tenantId: true ,id:true},
   });
   if (!currentUser) {

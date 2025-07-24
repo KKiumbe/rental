@@ -21,6 +21,7 @@ router.get('/buildings/:buildingId',verifyToken, getBuildingById);
 router.get('/buildings/search', searchBuildings);
 
 router.get('/buildings', verifyToken, getAllBuildings);
+router.put('/buildings/:buildingId', verifyToken, editBuilding);
  
 //units route
 router.get('/units/:unitId', verifyToken, getUnitDetails);

@@ -161,123 +161,123 @@ const getBuildingById = async (req, res) => {
 
 
 
-const editBuilding = async (req, res) => {
-  const tenantId = req.user?.tenantId;
+// const editBuilding = async (req, res) => {
+//   const tenantId = req.user?.tenantId;
 
-  const { user } = req.user;
+//   const { user } = req.user;
   
-  console.log(`user ${user}`);// Extract user ID from authenticated user
-  const { buildingId: id } = req.params;
-  const {
-    name,
-    address,
-    unitCount,
-    gasRate,
-    waterRate,
-    allowWaterBillingWithAverages,
-    allowGasBillingWithAverages,
-    billWater,
-    billGas,
-    billServiceCharge,
-    billGarbage,
-    billSecurity,
-    billAmenities,
-    billBackupGenerator,
-  } = req.body;
+//   console.log(`user ${user}`);// Extract user ID from authenticated user
+//   const { buildingId: id } = req.params;
+//   const {
+//     name,
+//     address,
+//     unitCount,
+//     gasRate,
+//     waterRate,
+//     allowWaterBillingWithAverages,
+//     allowGasBillingWithAverages,
+//     billWater,
+//     billGas,
+//     billServiceCharge,
+//     billGarbage,
+//     billSecurity,
+//     billAmenities,
+//     billBackupGenerator,
+//   } = req.body;
 
-  // Validate tenantId and buildingId
-  if (!tenantId) {
-    return res.status(400).json({ message: 'Tenant ID is required' });
-  }
+//   // Validate tenantId and buildingId
+//   if (!tenantId) {
+//     return res.status(400).json({ message: 'Tenant ID is required' });
+//   }
 
-  if (!id) {
-    return res.status(400).json({ message: 'Building ID is required' });
-  }
+//   if (!id) {
+//     return res.status(400).json({ message: 'Building ID is required' });
+//   }
 
-  // Validate required fields
-  if (name !== undefined && !name) {
-    return res.status(400).json({ message: 'Name is required if provided' });
-  }
+//   // Validate required fields
+//   if (name !== undefined && !name) {
+//     return res.status(400).json({ message: 'Name is required if provided' });
+//   }
 
-  // Validate numeric fields
-  if (unitCount !== undefined && (isNaN(unitCount) || unitCount < 0)) {
-    return res.status(400).json({ message: 'unitCount must be a non-negative number' });
-  }
-  if (gasRate !== undefined && (isNaN(gasRate) || gasRate < 0)) {
-    return res.status(400).json({ message: 'gasRate must be a non-negative number' });
-  }
-  if (waterRate !== undefined && (isNaN(waterRate) || waterRate < 0)) {
-    return res.status(400).json({ message: 'waterRate must be a non-negative number' });
-  }
+//   // Validate numeric fields
+//   if (unitCount !== undefined && (isNaN(unitCount) || unitCount < 0)) {
+//     return res.status(400).json({ message: 'unitCount must be a non-negative number' });
+//   }
+//   if (gasRate !== undefined && (isNaN(gasRate) || gasRate < 0)) {
+//     return res.status(400).json({ message: 'gasRate must be a non-negative number' });
+//   }
+//   if (waterRate !== undefined && (isNaN(waterRate) || waterRate < 0)) {
+//     return res.status(400).json({ message: 'waterRate must be a non-negative number' });
+//   }
 
-  try {
-    // Check if building exists and belongs to tenant
-    const existingBuilding = await prisma.building.findUnique({
-      where: { id },
-      select: { id: true, tenantId: true, name: true },
-    });
+//   try {
+//     // Check if building exists and belongs to tenant
+//     const existingBuilding = await prisma.building.findUnique({
+//       where: { id },
+//       select: { id: true, tenantId: true, name: true },
+//     });
 
-    if (!existingBuilding) {
-      return res.status(404).json({ message: 'Building not found' });
-    }
+//     if (!existingBuilding) {
+//       return res.status(404).json({ message: 'Building not found' });
+//     }
 
-    if (existingBuilding.tenantId !== tenantId) {
-      return res.status(403).json({ message: 'Building does not belong to your tenant' });
-    }
+//     if (existingBuilding.tenantId !== tenantId) {
+//       return res.status(403).json({ message: 'Building does not belong to your tenant' });
+//     }
 
-    // Prepare update data, only including fields that were provided
-    const updateData = {};
-    if (name) updateData.name = name;
-    if (address !== undefined) updateData.address = address;
-    if (unitCount !== undefined) updateData.unitCount = unitCount ? parseInt(unitCount) : null;
-    if (gasRate !== undefined) updateData.gasRate = gasRate ? parseFloat(gasRate) : null;
-    if (waterRate !== undefined) updateData.waterRate = waterRate ? parseFloat(waterRate) : null;
-    if (allowWaterBillingWithAverages !== undefined)
-      updateData.allowWaterBillingWithAverages = allowWaterBillingWithAverages;
-    if (allowGasBillingWithAverages !== undefined)
-      updateData.allowGasBillingWithAverages = allowGasBillingWithAverages;
-    if (billWater !== undefined) updateData.billWater = billWater;
-    if (billGas !== undefined) updateData.billGas = billGas;
-    if (billServiceCharge !== undefined) updateData.billServiceCharge = billServiceCharge;
-    if (billGarbage !== undefined) updateData.billGarbage = billGarbage;
-    if (billSecurity !== undefined) updateData.billSecurity = billSecurity;
-    if (billAmenities !== undefined) updateData.billAmenities = billAmenities;
-    if (billBackupGenerator !== undefined) updateData.billBackupGenerator = billBackupGenerator;
+//     // Prepare update data, only including fields that were provided
+//     const updateData = {};
+//     if (name) updateData.name = name;
+//     if (address !== undefined) updateData.address = address;
+//     if (unitCount !== undefined) updateData.unitCount = unitCount ? parseInt(unitCount) : null;
+//     if (gasRate !== undefined) updateData.gasRate = gasRate ? parseFloat(gasRate) : null;
+//     if (waterRate !== undefined) updateData.waterRate = waterRate ? parseFloat(waterRate) : null;
+//     if (allowWaterBillingWithAverages !== undefined)
+//       updateData.allowWaterBillingWithAverages = allowWaterBillingWithAverages;
+//     if (allowGasBillingWithAverages !== undefined)
+//       updateData.allowGasBillingWithAverages = allowGasBillingWithAverages;
+//     if (billWater !== undefined) updateData.billWater = billWater;
+//     if (billGas !== undefined) updateData.billGas = billGas;
+//     if (billServiceCharge !== undefined) updateData.billServiceCharge = billServiceCharge;
+//     if (billGarbage !== undefined) updateData.billGarbage = billGarbage;
+//     if (billSecurity !== undefined) updateData.billSecurity = billSecurity;
+//     if (billAmenities !== undefined) updateData.billAmenities = billAmenities;
+//     if (billBackupGenerator !== undefined) updateData.billBackupGenerator = billBackupGenerator;
 
-    // Update the building
-    const updatedBuilding = await prisma.building.update({
-      where: { id },
-      data: updateData,
-    });
+//     // Update the building
+//     const updatedBuilding = await prisma.building.update({
+//       where: { id },
+//       data: updateData,
+//     });
 
-    // Log the action in UserActivity
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: user } },
-        //tenantId,
-        action: `${user} UPDATED BUILDING ${updatedBuilding.name}`,
-        timestamp: new Date(),
-        tenant: { connect: { id: tenantId } },
-      },
-    });
+//     // Log the action in UserActivity
+//     await prisma.userActivity.create({
+//       data: {
+//         user: { connect: { id: user } },
+//         //tenantId,
+//         action: `${user} UPDATED BUILDING ${updatedBuilding.name}`,
+//         timestamp: new Date(),
+//         tenant: { connect: { id: tenantId } },
+//       },
+//     });
 
-    // Format response similar to getBuildingById
-    const formattedBuilding = {
-      ...updatedBuilding,
-      buildingName: updatedBuilding.name,
-    };
+//     // Format response similar to getBuildingById
+//     const formattedBuilding = {
+//       ...updatedBuilding,
+//       buildingName: updatedBuilding.name,
+//     };
 
-    res.status(200).json({ message: 'Building updated successfully', building: formattedBuilding });
-  } catch (error) {
-    console.error('Error updating building:', error);
-    if (error.code === 'P2025') {
-      return res.status(404).json({ message: 'Building not found' });
-    }
-    res.status(500).json({ message: 'Internal server error' });
-  } finally {
-    await prisma.$disconnect();
-  }
-};
+//     res.status(200).json({ message: 'Building updated successfully', building: formattedBuilding });
+//   } catch (error) {
+//     console.error('Error updating building:', error);
+//     if (error.code === 'P2025') {
+//       return res.status(404).json({ message: 'Building not found' });
+//     }
+//     res.status(500).json({ message: 'Internal server error' });
+//   } finally {
+//     await prisma.$disconnect();
+//   }
+// };
 
 
 
@@ -946,6 +946,189 @@ const getUnitDetails = async (req, res) => {
     await prisma.$disconnect();
   }
 };
+
+
+
+
+const editBuilding = async (req, res) => {
+  const { buildingId } = req.params;
+  const {
+    name,
+    address,
+    unitCount,
+    gasRate,
+    waterRate,
+    managementRate,
+    billType,
+    billWater,
+    billGas,
+    billServiceCharge,
+    billGarbage,
+    billSecurity,
+    billAmenities,
+    billBackupGenerator,
+    allowWaterBillingWithAverages,
+    allowGasBillingWithAverages,
+  } = req.body;
+  const { tenantId, userId, role, firstName, lastName } = req.user;
+
+  console.log('req.user:', JSON.stringify(req.user)); // Debug log
+
+  // Validate req.user
+  if (!userId || !tenantId) {
+    return res.status(401).json({ success: false, message: 'Authenticated user ID or tenant ID is missing' });
+  }
+
+  // Validate required fields
+  if (!name) {
+    return res.status(400).json({ success: false, message: 'Building name is required' });
+  }
+
+  // Validate numeric fields
+  if (unitCount !== undefined && (isNaN(unitCount) || parseInt(unitCount) < 0)) {
+    return res.status(400).json({ success: false, message: 'unitCount must be a non-negative number' });
+  }
+  if (gasRate !== undefined && (isNaN(gasRate) || parseFloat(gasRate) < 0)) {
+    return res.status(400).json({ success: false, message: 'gasRate must be a non-negative number' });
+  }
+  if (waterRate !== undefined && (isNaN(waterRate) || parseFloat(waterRate) < 0)) {
+    return res.status(400).json({ success: false, message: 'waterRate must be a non-negative number' });
+  }
+  if (managementRate !== undefined && (isNaN(managementRate) || parseFloat(managementRate) < 0)) {
+    return res.status(400).json({ success: false, message: 'managementRate must be a non-negative number' });
+  }
+  if (billType === 'WATER_ONLY' && !billWater) {
+    return res.status(400).json({ success: false, message: 'billWater must be enabled for WATER_ONLY billing' });
+  }
+  if (billType === 'WATER_ONLY' && (!waterRate || parseFloat(waterRate) <= 0)) {
+    return res.status(400).json({ success: false, message: 'A valid water rate is required for WATER_ONLY billing' });
+  }
+
+  try {
+    // Verify authenticated user
+    const currentUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, tenantId: true, role: true },
+    });
+    if (!currentUser) {
+      return res.status(404).json({ success: false, message: 'Authenticated user not found' });
+    }
+    if (currentUser.tenantId !== tenantId) {
+      return res.status(403).json({ success: false, message: 'User does not belong to the specified tenant' });
+    }
+    if (!role.includes('ADMIN')) {
+      return res.status(403).json({ success: false, message: 'Only admins can update buildings' });
+    }
+
+    // Verify building exists and belongs to the tenant
+    const building = await prisma.building.findUnique({
+      where: { id: buildingId },
+      select: { id: true, tenantId: true, landlordId: true },
+    });
+    if (!building) {
+      return res.status(404).json({ success: false, message: 'Building not found' });
+    }
+    if (building.tenantId !== tenantId) {
+      return res.status(403).json({ success: false, message: 'Building does not belong to the authenticated tenant' });
+    }
+
+    // Update building
+    const updatedBuilding = await prisma.building.update({
+      where: { id: buildingId },
+      data: {
+        name,
+        address: address || null,
+        unitCount: unitCount ? parseInt(unitCount) : null,
+        gasRate: gasRate ? parseFloat(gasRate) : null,
+        waterRate: waterRate ? parseFloat(waterRate) : null,
+        managementRate: managementRate ? parseFloat(managementRate) : null,
+        billType: billType || 'FULL',
+        billWater: billWater || false,
+        billGas: billGas || false,
+        billServiceCharge: billServiceCharge || false,
+        billGarbage: billGarbage || false,
+        billSecurity: billSecurity || false,
+        billAmenities: billAmenities || false,
+        billBackupGenerator: billBackupGenerator || false,
+        allowWaterBillingWithAverages: allowWaterBillingWithAverages || false,
+        allowGasBillingWithAverages: allowGasBillingWithAverages || false,
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        landlordId: true,
+        name: true,
+        address: true,
+        unitCount: true,
+        gasRate: true,
+        waterRate: true,
+        managementRate: true,
+        billType: true,
+        billWater: true,
+        billGas: true,
+        billServiceCharge: true,
+        billGarbage: true,
+        billSecurity: true,
+        billAmenities: true,
+        billBackupGenerator: true,
+        allowWaterBillingWithAverages: true,
+        allowGasBillingWithAverages: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+    });
+
+    // Log user activity
+    await prisma.userActivity.create({
+      data: {
+        userId,
+        tenantId,
+        action: `UPDATED BUILDING ${updatedBuilding.name} by ${firstName} ${lastName}`,
+        timestamp: new Date(),
+        details: { buildingId: updatedBuilding.id },
+      },
+    });
+
+    res.status(200).json({
+      success: true,
+      message: 'Building updated successfully',
+      building: updatedBuilding,
+    });
+  } catch (error) {
+    console.error('Error updating building:', {
+      error: error.message,
+      stack: error.stack,
+      tenantId,
+      buildingId,
+      userId,
+    });
+
+    if (error.name === 'PrismaClientKnownRequestError') {
+      if (error.code === 'P2002') {
+        return res.status(400).json({
+          success: false,
+          message: 'A building with this name may already exist for the tenant',
+        });
+      }
+      if (error.code === 'P2025') {
+        return res.status(404).json({
+          success: false,
+          message: 'Building not found',
+        });
+      }
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid database request',
+        error: error.message,
+      });
+    }
+
+    res.status(500).json({ success: false, message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
+  }
+};
+
 
 
 

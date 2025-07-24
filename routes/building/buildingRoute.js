@@ -32,7 +32,7 @@ router.post('/create-unit', verifyToken, createUnit);
 router.put('/units/:unitId', verifyToken, editUnit);
 
 router.get('/units/:id/customers', verifyToken, getUnitCustomers);
-router.get('/units/:buildingId', verifyToken, getUnitsByBuilding);
+router.get('/buildings/:buildingId', verifyToken, getUnitsByBuilding);
 //router.get('/units/:unitId', verifyToken, getUnitDetailsById);
 
 //router.put('/units/:unitId', verifyToken, editUnit);

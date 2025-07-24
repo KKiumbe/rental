@@ -1130,6 +1130,44 @@ const editBuilding = async (req, res) => {
 };
 
 
+// Adjust path to your prisma instance
+
+// const createUnit = async (req, res) => {
+//   try {
+//     const {
+//       buildingId,
+//       unitNumber,
+//       monthlyCharge,
+//       depositAmount,
+//       garbageCharge = 0,
+//       serviceCharge = 0,
+//     } = req.body;
+
+//     // Basic validation
+//     if (!buildingId || !unitNumber || !monthlyCharge || !depositAmount) {
+//       return res.status(400).json({ message: 'Missing required fields' });
+//     }
+
+//     const newUnit = await prisma.unit.create({
+//       data: {
+//         building: { connect: { id: buildingId } },
+//         unitNumber,
+//         monthlyCharge: parseFloat(monthlyCharge),
+//         depositAmount: parseFloat(depositAmount),
+//         garbageCharge: parseFloat(garbageCharge),
+//         serviceCharge: parseFloat(serviceCharge),
+//       },
+//     });
+
+//     res.status(201).json(newUnit);
+//   } catch (error) {
+//     console.error('Error creating unit:', error);
+//     res.status(500).json({ message: 'Internal server error' });
+//   }
+// };
+
+
+
 
 
 

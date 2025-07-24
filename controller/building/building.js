@@ -291,7 +291,7 @@ const createBuilding = async (req, res) => {
   const { landlordId, name, address, unitCount, gasRate, waterRate, allowWaterBillingWithAverages, allowGasBillingWithAverages, billWater, billGas, billServiceCharge, billGarbage, billSecurity, billAmenities, billBackupGenerator, billPower, managementRate, billType, caretakerId } = req.body;
   const { tenantId, userId} = req.user; // Extract tenantId and userId from authenticated user
    
-  console.log(`this is the user ${req.user}`);
+  console.log(`this is the user ${JSON.stringify(req.user)}`);
   // Validate req.user
   if (!userId || !tenantId) {
     return res.status(401).json({ success: false, message: 'Authenticated user ID or tenant ID is missing' });

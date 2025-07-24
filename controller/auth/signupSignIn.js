@@ -247,7 +247,7 @@ const signin = async (req, res) => {
     // Generate a JWT token
     const token = jwt.sign(
       {
-        id: user.id,
+        userId: user.id,
         phoneNumber: user.phoneNumber,
         firstName: user.firstName,
         lastName: user.lastName,

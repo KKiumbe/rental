@@ -289,7 +289,7 @@ const editBuilding = async (req, res) => {
 
 const createBuilding = async (req, res) => {
   const { landlordId, name, address, unitCount, gasRate, waterRate, allowWaterBillingWithAverages, allowGasBillingWithAverages, billWater, billGas, billServiceCharge, billGarbage, billSecurity, billAmenities, billBackupGenerator, billPower, managementRate, billType, caretakerId } = req.body;
-  const { tenantId, id: userId } = req.user; // Extract tenantId and userId from authenticated user
+  const { tenantId, userId} = req.user; // Extract tenantId and userId from authenticated user
 
   // Validate req.user
   if (!userId || !tenantId) {
@@ -317,22 +317,7 @@ const createBuilding = async (req, res) => {
 
   try {
     // Verify authenticated user
-    const currentUser = await prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, firstName: true, lastName: true, tenantId: true, role: true },
-    });
-
-    if (!currentUser) {
-      return res.status(404).json({ success: false, message: 'Authenticated user not found' });
-    }
-    if (currentUser.tenantId !== tenantId) {
-      return res.status(403).json({ success: false, message: 'User does not belong to the specified tenant' });
-    }
-    // Optional: Restrict to admin users
-    if (!currentUser.role.includes('ADMIN')) {
-      return res.status(403).json({ success: false, message: 'Only admins can create buildings' });
-    }
-
+   
     // Verify tenant exists
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
@@ -416,7 +401,7 @@ const createBuilding = async (req, res) => {
     // Log user activity
     await prisma.userActivity.create({
       data: {
-        userId: currentUser.id,
+        userId: userId,
         tenantId,
         action: `CREATED BUILDING ${building.name}`,
         timestamp: new Date(),

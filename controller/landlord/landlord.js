@@ -64,9 +64,9 @@ const createLandlord = async (req, res) => {
     // Log user activity
     await prisma.userActivity.create({
       data: {
-        user: { connect: { id: currentUser.id } },
+        user: { connect: { id: userId } },
         tenant: { connect: { id: tenantId } },
-        action: `${currentUser.firstName} added landlord ${firstName} ${lastName}`,
+        action: `added landlord by ${req.user.firstName} ${req.user.lastName}`,
         timestamp: new Date(),
       },
     });

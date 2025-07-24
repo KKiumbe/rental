@@ -1,4 +1,4 @@
-const { PrismaClient, InvoiceStatus } = require('@prisma/client');
+const { PrismaClient, InvoiceStatus, InvoiceType, DepositStatus } = require('@prisma/client');
 const { json } = require('express');
 //const { GarbageCollectionDay } = require('./enum.js'); // Adjust the path if needed
 
@@ -1073,7 +1073,7 @@ const generateInvoicesForDay = async (day) => {
 
 
 const createInitialInvoice = async (req, res) => {
-  const { tenantId, user } = req.user;
+  const { tenantId, userId, role, firstName, lastName, email, phoneNumber } = req.user;
   const { customerId, invoiceItems: inputInvoiceItems = [], balanceThreshold = 0, customMessage = 'please make payment to complete your onboarding.' } = req.body;
 
   // Validate input
@@ -1115,16 +1115,7 @@ const createInitialInvoice = async (req, res) => {
     }
 
     // Validate user
-    const currentUser = await prisma.user.findUnique({
-      where: { id: user },
-      select: { tenantId: true, firstName: true, lastName: true },
-    });
-    if (!currentUser || currentUser.tenantId !== tenantId) {
-      return res.status(404).json({
-        success: false,
-        message: 'Authenticated user not found or does not belong to tenant.',
-      });
-    }
+   
 
     // Validate customer and fetch unit and building details
     const customer = await prisma.customer.findUnique({
@@ -1219,9 +1210,10 @@ const createInitialInvoice = async (req, res) => {
           status: InvoiceStatus.UNPAID, // Using InvoiceStatus enum
           closingBalance: invoiceAmount,
           isSystemGenerated: false,
-          createdBy: currentUser.firstName + ' ' + currentUser.lastName,
+          createdBy: firstName + ' ' + lastName,
           createdAt: new Date(),
           updatedAt: new Date(),
+          invoiceType: InvoiceType.ONBOARDING,
           InvoiceItem: {
             create: invoiceItems.map((item) => ({
               description: item.description,
@@ -1260,14 +1252,14 @@ const createInitialInvoice = async (req, res) => {
       );
 
       // Log invoice creation activity
-      const activity = await tx.userActivity.create({
-        data: {
-          userId: user,
-          tenantId,
-          action: `Created initial invoice ${invoice.invoiceNumber} for customer ${customerId} by ${currentUser.firstName} ${currentUser.lastName}`,
-          timestamp: new Date(),
-        },
-      });
+      // const activity = await tx.userActivity.create({
+      //   data: {
+      //     userId: user,
+      //     tenantId,
+      //     action: `Created initial invoice ${invoice.invoiceNumber} for customer ${customerId} by ${firstName} ${lastName}`,
+      //     timestamp: new Date(),
+      //   },
+      // });
 
       // Check if customer's updated closingBalance exceeds threshold and send SMS
       let smsResponse = null;
@@ -1287,40 +1279,40 @@ const createInitialInvoice = async (req, res) => {
           const smsMessage = `Welcome to ${customer.unit.building.name}, we are glad to have you. Your account was created successfully. Billed items: ${itemsList}. Kindly Pay ${balanceText} to reserve unit ${customer.unit.unitNumber}. Paybill: ${paybill}, Acct: ${customer.phoneNumber}. Inquiries? ${customerSupport}`;
 
           // Send SMS
-          smsResponse = await sendSMS(tenantId, [{ mobile, message: smsMessage }]);
+          //smsResponse = await sendSMS(tenantId, [{ mobile, message: smsMessage }]);
 
           // Log SMS activity
-          await tx.userActivity.create({
-            data: {
-              userId: user,
-              tenantId,
-              action: `Sent custom SMS to customer ${customerId} for balance above ${balanceThreshold}`,
-              details: {
-                customerId,
-                balanceThreshold,
-                customMessage,
-                balance: updatedCustomer.closingBalance,
-                buildingName: customer.unit.building.name,
-                billedItems: itemsList,
-              },
-              timestamp: new Date(),
-            },
-          });
+          // await tx.userActivity.create({
+          //   data: {
+          //     userId: user,
+          //     tenantId,
+          //     action: `Sent custom SMS to customer ${customerId} for balance above ${balanceThreshold}`,
+          //     details: {
+          //       customerId,
+          //       balanceThreshold,
+          //       customMessage,
+          //       balance: updatedCustomer.closingBalance,
+          //       buildingName: customer.unit.building.name,
+          //       billedItems: itemsList,
+          //     },
+          //     timestamp: new Date(),
+          //   },
+          // });
         } else {
           // Log error if no valid phone number
-          await tx.userActivity.create({
-            data: {
-              userId: user,
-              tenantId,
-              action: `Failed to send SMS to customer ${customerId}: No valid phone number`,
-              details: { customerId, balanceThreshold },
-              timestamp: new Date(),
-            },
-          });
+          // await tx.userActivity.create({
+          //   data: {
+          //     userId: user,
+          //     tenantId,
+          //     action: `Failed to send SMS to customer ${customerId}: No valid phone number`,
+          //     details: { customerId, balanceThreshold },
+          //     timestamp: new Date(),
+          //   },
+          // });
         }
       }
 
-      return { invoice, deposits, activity, smsResponse };
+      return { invoice, deposits };
     }, { timeout: 10000 });
 
     return res.status(201).json({
@@ -1329,7 +1321,7 @@ const createInitialInvoice = async (req, res) => {
       data: {
         invoice: result.invoice,
         deposits: result.deposits,
-        smsResponse: result.smsResponse,
+        //smsResponse: result.smsResponse,
       },
     });
   } catch (error) {
@@ -2050,6 +2042,78 @@ const searchInvoices = async (req, res) => {
   }
 };
 
+
+
+
+//  async function createInitialInvoice(req, res) {
+
+//   const {
+//     customerId, invoiceItems, currentUser, } = req.body;
+//   const tenantId = req.user?.tenantId;
+//   // Calculate invoice amount
+//   const invoiceAmount = invoiceItems.reduce(
+//     (sum, item) => sum + item.amount * item.quantity,
+//     0
+//   );
+
+//   // Fetch customer (with current balance & unit)
+//   const customer = await prisma.customer.findUnique({
+//     where: { id: customerId },
+//     select: { closingBalance: true, unitId: true, firstName: true, phoneNumber: true },
+//   });
+
+//   if (!customer) throw new Error('Customer not found');
+
+//   const previousClosingBalance = customer.closingBalance ?? 0;
+//   const newClosingBalance = previousClosingBalance + invoiceAmount;
+//   const invoiceNumber = generateInvoiceNumber(customerId); // ensure it's unique
+
+
+//   // Optional: for SMS later
+//   const { customerSupportPhoneNumber: customerSupport } = await getSMSConfigForTenant(tenantId);
+//   const paybill = await getShortCode(tenantId);
+
+//   // Create invoice in transaction
+//   const result = await prisma.$transaction(async (tx) => {
+//     const invoice = await tx.invoice.create({
+//       data: {
+//         tenantId,
+//         customerId,
+//         unitId: customer.unitId,
+//         invoicePeriod: new Date(),
+//         invoiceNumber,
+//         invoiceAmount,
+//         amountPaid: 0,
+//         status: InvoiceStatus.UNPAID,
+//         closingBalance: invoiceAmount,
+//         isSystemGenerated: false,
+//         createdBy: `${currentUser.firstName} ${currentUser.lastName}`,
+//         createdAt: new Date(),
+//         updatedAt: new Date(),
+//         InvoiceItem: {
+//           create: invoiceItems.map((item) => ({
+//             description: item.description,
+//             amount: item.amount,
+//             quantity: item.quantity,
+//           })),
+//         },
+//       },
+//     });
+
+//     await tx.customer.update({
+//       where: { id: customerId },
+//       data: { closingBalance: newClosingBalance },
+//     });
+
+//     return invoice;
+//   });
+
+//   return result;
+// }
+
+
+  
+
   
 
 module.exports = {
@@ -2065,5 +2129,5 @@ module.exports = {
   generateInvoicesByDay,
   generateInvoicesPerTenant,searchInvoices,
   generateInvoicesForAll ,cancelCustomerInvoice,
-  invoiceCreate,
+  invoiceCreate,createInitialInvoice
 };

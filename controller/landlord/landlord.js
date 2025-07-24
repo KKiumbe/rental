@@ -90,6 +90,81 @@ const createLandlord = async (req, res) => {
 };
 
 
+const editLandlord = async (req, res) => {
+  const { tenantId, userId } = req.user;
+  const { id:landlordId } = req.params;
+  const { firstName, lastName, email, phoneNumber, status } = req.body;
+
+  if (!landlordId) {
+    return res.status(400).json({ message: 'Landlord ID is required.' });
+  }
+
+  try {
+    const landlord = await prisma.landlord.findFirst({
+      where: {
+        id: landlordId,
+        tenantId,
+      },
+    });
+
+    if (!landlord) {
+      return res.status(404).json({ message: 'Landlord not found for this tenant.' });
+    }
+
+    // Validate status if provided
+    const validStatuses = Object.values(LandlordStatus);
+    if (status && !validStatuses.includes(status)) {
+      return res.status(400).json({
+        message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
+      });
+    }
+
+    // Check for uniqueness (excluding current landlord)
+    const duplicate = await prisma.landlord.findFirst({
+      where: {
+        tenantId,
+        id: { not: landlordId },
+        OR: [
+          { phoneNumber },
+          ...(email ? [{ email }] : []),
+        ],
+      },
+    });
+
+    if (duplicate) {
+      return res.status(400).json({
+        message: 'Phone number or email already exists for another landlord.',
+      });
+    }
+
+    const updatedLandlord = await prisma.landlord.update({
+      where: { id: landlordId },
+      data: {
+        firstName,
+        lastName,
+        email,
+        phoneNumber,
+        status,
+      },
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: 'Landlord updated successfully',
+      data: updatedLandlord,
+    });
+  } catch (error) {
+    console.error('Error updating landlord:', error);
+
+    if (error.code === 'P2002') {
+      return res.status(400).json({ message: 'Phone number or email must be unique.' });
+    }
+
+    return res.status(500).json({ message: 'Internal server error' });
+  }
+};
+
+
 
 const searchLandlords = async (req, res) => {
   const { query } = req.query; // e.g., "John"
@@ -130,48 +205,40 @@ const searchLandlords = async (req, res) => {
 
 
 
-const getBuildingsByLandlord = async (req, res) => {
-  const { landlordId } = req.params;
+
+const getLandlordDetails = async (req, res) => {
+  const { id: landlordId } = req.params;
   const { tenantId } = req.user;
 
+  if (!landlordId) {
+    return res.status(400).json({ message: 'Landlord ID is required' });
+  }
+
   try {
-    // Check if landlord exists
     const landlord = await prisma.landlord.findUnique({
       where: { id: landlordId },
+      include: {
+        buildings: {
+          where: { tenantId },
+          select: {
+            id: true,
+            name: true,
+          },
+        },
+      },
     });
 
     if (!landlord || landlord.tenantId !== tenantId) {
       return res.status(404).json({ message: 'Landlord not found or does not belong to tenant.' });
     }
 
-    // Fetch buildings
-    const buildings = await prisma.building.findMany({
-      where: {
-        landlordId,
-        tenantId,
-      },
-      select: {
-        id: true,
-        name: true,
-        address: true,
-        unitCount: true,
-        customers: {
-          select: {
-            id: true,
-            houseNumber: true,
-            status: true,
-          },
-        },
-      },
-      orderBy: { name: 'asc' },
-    });
-
-    res.status(200).json({ message: 'Buildings retrieved successfully', buildings });
+    res.status(200).json({ landlord });
   } catch (error) {
-    console.error('Error fetching buildings:', error);
+    console.error('Error fetching landlord details:', error);
     res.status(500).json({ message: 'Internal server error' });
   }
 };
+
 
 
 
@@ -263,4 +330,4 @@ const getLandlordById = async (req, res) => {
 
 
 
-module.exports = { getBuildingsByLandlord , createLandlord , searchLandlords ,getAllLandlords, getLandlordById };
+module.exports = { createLandlord , searchLandlords ,getAllLandlords, getLandlordById, getLandlordDetails,editLandlord};

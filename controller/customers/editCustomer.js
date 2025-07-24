@@ -51,8 +51,8 @@ const editCustomer = async (req, res) => {
   } = req.body;
 
   // Extract tenantId and userId from the authenticated user
-  const tenantId = req.user?.tenantId;
-  const userId = req.user?.user;
+  const {tenantId} = req.user;
+  const {userId} = req.user;
 
   // Validate inputs
   if (!customerId) {
@@ -140,6 +140,9 @@ const editCustomer = async (req, res) => {
     res.status(500).json({ message: 'Error updating customer' });
   }
 };
+
+
+
 
 
 module.exports = { editCustomer, getUnitCustomers };

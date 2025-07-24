@@ -3,9 +3,9 @@ const prisma = new PrismaClient();
 
 
 
-const createCustomer = async (req, res) => {
 
-  const { tenantId } = req.user;
+const createCustomer = async (req, res) => {
+  const { tenantId, id: userId , role, firstName: userFirstName, lastName: userLastName} = req.user;
   const {
     buildingId,
     firstName,
@@ -14,86 +14,48 @@ const createCustomer = async (req, res) => {
     phoneNumber,
     secondaryPhoneNumber,
     houseNumber,
-    monthlyCharge,
+    unitId,
     garbageCharge,
     serviceCharge,
     closingBalance,
     status,
   } = req.body;
 
-  // Validate required fields
-  if (!tenantId || !buildingId || !firstName || !lastName || !phoneNumber || !monthlyCharge) {
+
+  console.log(`object ${JSON.stringify(req.body)}`);
+
+
+  if (!tenantId || !buildingId || !firstName || !lastName || !phoneNumber || !unitId) {
     return res.status(400).json({
-      message: 'Required fields: tenantId, buildingId, firstName, lastName, phoneNumber, monthlyCharge.',
+      message: 'Required fields: tenantId, buildingId, firstName, lastName, phoneNumber, unitId.',
     });
   }
 
-
-  // Validate status
-  const validStatuses = ['ACTIVE', 'INACTIVE']; // Adjust based on CustomerStatus enum
+  const validStatuses = ['ACTIVE', 'INACTIVE'];
   if (status && !validStatuses.includes(status)) {
     return res.status(400).json({
       message: `Invalid status. Valid values: ${validStatuses.join(', ')}`,
     });
   }
 
-
-  // Validate numeric fields
-  const numericFields = { monthlyCharge, garbageCharge, serviceCharge, closingBalance };
+  const numericFields = { garbageCharge, serviceCharge, closingBalance };
   for (const [field, value] of Object.entries(numericFields)) {
     if (value !== undefined && (isNaN(value) || value < 0)) {
       return res.status(400).json({ message: `${field} must be a non-negative number.` });
     }
   }
 
-
   try {
-    // Check if tenant exists
-    const tenant = await prisma.tenant.findUnique({
-      where: { id: tenantId },
-    });
+    const tenant = await prisma.tenant.findUnique({ where: { id: tenantId } });
+    if (!tenant) return res.status(404).json({ message: 'Tenant not found.' });
 
-    if (!tenant) {
-      return res.status(404).json({ message: 'Tenant not found.' });
-    }
+   
 
-
-    // Check if authenticated user exists and belongs to the tenant
-    const currentUser = await prisma.user.findUnique({
-      where: { id: user },
-      select: { tenantId: true, firstName: true, lastName: true ,id:true},
-
-      select: { tenantId: true, firstName: true, lastName: true },
-
-    });
-    if (!currentUser) {
-      return res.status(404).json({
-        success: false,
-        message: 'Authenticated user not found.',
-      });
-    }
-    if (currentUser.tenantId !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        message: 'User does not belong to the specified tenant.',
-      });
-    }
-
-    // Check if authenticated user belongs to the tenant
-    if (req.user.tenantId !== tenantId) {
-      return res.status(403).json({ message: 'User does not belong to the specified tenant.' });
-    }
-
-    // Check if building exists and belongs to tenant
-    const building = await prisma.building.findUnique({
-      where: { id: buildingId },
-    });
-
+    const building = await prisma.building.findUnique({ where: { id: buildingId } });
     if (!building || building.tenantId !== tenantId) {
       return res.status(404).json({ message: 'Building not found or does not belong to tenant.' });
     }
 
-    // Check if phone number already exists
     const existingCustomer = await prisma.customer.findUnique({
       where: { phoneNumber },
     });
@@ -102,63 +64,78 @@ const createCustomer = async (req, res) => {
       return res.status(400).json({ message: 'Phone number already exists for this tenant.' });
     }
 
+    // Fetch unit to ensure it exists and belongs to the tenant
+    const unit = await prisma.unit.findUnique({
+      where: { id: unitId },
+    });
+
+    if (!unit || unit.tenantId !== tenantId) {
+      return res.status(404).json({ message: 'Unit not found or does not belong to tenant.' });
+    }
+
     // Create customer
-    const customer = await prisma.customer.create({
+  const customer = await prisma.customer.create({
+  data: {
+    tenantId: tenantId,
+    firstName: firstName,
+    lastName: lastName,
+    email: email,
+    phoneNumber: phoneNumber,
+    secondaryPhoneNumber: secondaryPhoneNumber,
+    
+    status: status,
+    closingBalance: closingBalance,
+    Building: {
+      connect: {
+        id: buildingId
+      }
+    },
+    unitId
+  }
+}); 
+
+
+    // Create CustomerUnit link
+    await prisma.customerUnit.create({
       data: {
-        tenantId,
-        buildingId,
-        firstName,
-        lastName,
-        email,
-        phoneNumber,
-        secondaryPhoneNumber,
-        houseNumber,
-        monthlyCharge: parseFloat(monthlyCharge),
-        garbageCharge: garbageCharge ? parseFloat(garbageCharge) : null,
-        serviceCharge: serviceCharge ? parseFloat(serviceCharge) : null,
-        status: status ?? 'ACTIVE',
-        closingBalance: closingBalance ? parseFloat(closingBalance) : 0,
+        customerId: customer.id,
+        unitId: unitId,
+        isActive: true,
+        startDate: new Date(),
       },
     });
 
-
-    // Update unit status to OCCUPIED
+    // Update unit to OCCUPIED
     await prisma.unit.update({
       where: { id: unitId },
       data: { status: 'OCCUPIED' },
     });
 
     // Log user activity
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: currentUser.id } },
-        tenant: { connect: { id: tenantId } },
-        customer: { connect: { id: customer.id } }, // Link to the customer
-        user: { connect: { id: user } },
-        tenant: { connect: { id: tenantId } },
-        action: `Added customer ${firstName} ${lastName} to unit ${unitId}`,
-        timestamp: new Date(),
-      },
-    });
+    // await prisma.userActivity.create({
+    //   data: {
+    //     user: { connect: { id: userId } },
+    //     tenant: { connect: { id: tenantId } },
+    //     customer: { connect: { id: customer.id } },
+    //     action: `Added customer ${userFirstName} ${userLastName} to unit ${unitId}`,
+    //     timestamp: new Date(),
+    //   },
+    // });
 
     return res.status(201).json({
       success: true,
-      message: 'Customer created successfully',
+      message: 'Customer created and linked to unit successfully',
       data: customer,
     });
-
-    res.status(201).json({ message: 'Customer created successfully', customer });
   } catch (error) {
     console.error('Error creating customer:', error);
-
-    // Handle unique constraint violation
     if (error.code === 'P2002' && error.meta?.target.includes('phoneNumber')) {
       return res.status(400).json({ message: 'Phone number must be unique.' });
     }
-
-    res.status(500).json({ message: 'Internal server error' });
+    return res.status(500).json({ message: 'Internal server error' });
   }
 };
+
 
 
 

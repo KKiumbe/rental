@@ -25,7 +25,7 @@ router.put('/invoices/cancel/:invoiceId/', verifyToken, cancelInvoiceById);
 //router.post('/invoices', verifyToken,createInvoice);
 
 router.post('/create-invoice', verifyToken,createInvoice);
-//router.post('/customer-onboarding-invoice', verifyToken,createInitialInvoice);
+router.post('/customer-onboarding-invoice', verifyToken,createInitialInvoice);
 
 
 router.post('/send-bulk-sms', addSmsJob);

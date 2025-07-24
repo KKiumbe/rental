@@ -675,4 +675,5 @@ enum BillType {
 enum InvoiceType {
   RENT_PLUS
   WATER
+  ONBOARDING
 }

@@ -69,7 +69,9 @@ const sanitizePhoneNumber = (phone) => {
 };
 
 const uploadCustomers = async (req, res) => {
-  const { tenantId, user: userId } = req.user;
+  const { tenantId,userId } = req.user;
+
+  console.log(`user details: ${JSON.stringify(req.user)}`);
 
   if (!tenantId || !userId) {
     return res.status(401).json({ success: false, message: 'Unauthorized: Tenant or User ID missing' });
@@ -330,7 +332,7 @@ const uploadCustomers = async (req, res) => {
 
 
 async function uploadCustomersWithBuilding(req, res) {
-  const { tenantId, user: userId } = req.user;
+  const { tenantId, userId } = req.user;
   const { buildingId } = req.body; // Get buildingId from request body
 
   try {

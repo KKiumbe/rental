@@ -755,4 +755,126 @@ const searchBuildings = async (req, res) => {
 
 
 
-module.exports = { createBuilding, searchBuildings,assignUnitToCustomer, createUnit, getAllBuildings, getBuildingById, editBuilding };
+
+const getUnitDetails = async (req, res) => {
+  const { unitId:id } = req.params;
+  const { tenantId } = req.user; // Assuming tenantId is available from authentication middleware
+
+  if (!tenantId) {
+    return res.status(400).json({ message: 'Tenant ID is required' });
+  }
+  if (!id || typeof id !== 'string') {
+    return res.status(400).json({ message: 'Valid Unit ID is required' });
+  }
+
+  try {
+    const unit = await prisma.unit.findFirst({
+      where: {
+        id,
+        tenantId,
+      },
+      select: {
+        id: true,
+        unitNumber: true,
+        monthlyCharge: true,
+        depositAmount: true,
+        garbageCharge: true,
+        serviceCharge: true,
+        securityCharge: true,
+        amenitiesCharge: true,
+        backupGeneratorCharge: true,
+        status: true,
+        createdAt: true,
+        updatedAt: true,
+        building: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+            landlordId: true,
+          },
+        },
+        CustomerUnit: {
+          where: { isActive: true },
+          select: {
+            customer: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                phoneNumber: true,
+                email: true,
+              },
+            },
+            startDate: true,
+            endDate: true,
+            isActive: true,
+          },
+        },
+      },
+    });
+
+    if (!unit) {
+      return res.status(404).json({ message: 'Unit not found or does not belong to this tenant' });
+    }
+
+    // Format the response to match the frontend's expectations
+    const formattedUnit = {
+      id: unit.id,
+      unitNumber: unit.unitNumber,
+      monthlyCharge: unit.monthlyCharge || 0,
+      depositAmount: unit.depositAmount || 0,
+      garbageCharge: unit.garbageCharge || 0,
+      serviceCharge: unit.serviceCharge || 0,
+      securityCharge: unit.securityCharge || 0,
+      amenitiesCharge: unit.amenitiesCharge || 0,
+      backupGeneratorCharge: unit.backupGeneratorCharge || 0,
+      status: unit.status,
+      createdAt: unit.createdAt.toISOString(),
+      updatedAt: unit.updatedAt.toISOString(),
+      building: unit.building
+        ? {
+            id: unit.building.id,
+            name: unit.building.name,
+            address: unit.building.address || null,
+            landlordId: unit.building.landlordId,
+          }
+        : null,
+      customers: unit.CustomerUnit.map((cu) => ({
+        id: cu.customer.id,
+        fullName: `${cu.customer.firstName} ${cu.customer.lastName}`.trim(),
+        phoneNumber: cu.customer.phoneNumber,
+        email: cu.customer.email || null,
+        startDate: cu.startDate.toISOString(),
+        endDate: cu.endDate?.toISOString() || null,
+        isActive: cu.isActive,
+      })),
+    };
+
+    res.status(200).json({ data: formattedUnit });
+  } catch (error) {
+    console.error('Error retrieving unit details:', {
+      error: error.message,
+      stack: error.stack,
+      unitId: id,
+      tenantId,
+    });
+
+    if (error.name === 'PrismaClientKnownRequestError') {
+      if (error.code === 'P2025') {
+        return res.status(404).json({ message: 'Unit not found' });
+      }
+      return res.status(400).json({ message: 'Invalid database request', error: error.message });
+    }
+
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await prisma.$disconnect();
+  }
+};
+
+
+
+
+
+module.exports = { createBuilding, searchBuildings,assignUnitToCustomer, createUnit, getAllBuildings, getBuildingById, editBuilding ,getUnitDetails};

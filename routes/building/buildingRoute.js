@@ -1,7 +1,7 @@
 // routes/customerRoutes.js
 const express = require('express');
 const verifyToken = require('../../middleware/verifyToken.js');
-const { createBuilding, searchBuildings, createUnit, getAllBuildings, getBuildingById, editBuilding, getUnitsByBuilding, getUnitDetailsById, editUnit } = require('../../controller/building/building.js');
+const { createBuilding, searchBuildings, createUnit, getAllBuildings, getBuildingById, editBuilding, getUnitsByBuilding, getUnitDetailsById, editUnit ,getUnitDetails} = require('../../controller/building/building.js');
 
 //const { createBuilding, searchBuildings } = require('../../controller/building/building.js');
 
@@ -23,7 +23,7 @@ router.get('/buildings/search', searchBuildings);
 router.get('/buildings', verifyToken, getAllBuildings);
  
 //units route
-//router.get('/units/:unitId', verifyToken, getUnitDetailsById);
+router.get('/units/:unitId', verifyToken, getUnitDetails);
 
 //router.put('/units/:unitId', verifyToken, editUnit);
 

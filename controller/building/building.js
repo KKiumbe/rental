@@ -625,23 +625,7 @@ const createUnit = async (req, res) => {
     }
 
     // Check if authenticated user exists and belongs to the tenant
-    const currentUser = await prisma.user.findUnique({
-      where: { id: user },
-      select: { tenantId: true, firstName: true, lastName: true },
-    });
-    if (!currentUser) {
-      return res.status(404).json({
-        success: false,
-        message: 'Authenticated user not found.',
-      });
-    }
-    if (currentUser.tenantId !== tenantId) {
-      return res.status(403).json({
-        success: false,
-        message: 'User does not belong to the specified tenant.',
-      });
-    }
-
+    
     // Check if building exists and belongs to the tenant
     const building = await prisma.building.findUnique({
       where: { id: buildingId },
@@ -688,16 +672,16 @@ const createUnit = async (req, res) => {
       data: { unitCount: { increment: 1 } },
     });
 
-    // Log user activity
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: user } },
-        tenant: { connect: { id: tenantId } },
+    // // Log user activity
+    // await prisma.userActivity.create({
+    //   data: {
+    //     user: { connect: { id: req.user.user } },
+    //     tenant: { connect: { id: tenantId } },
 
-        action: `CREATED UNIT ${unitNumber} IN BUILDING ${building.name}`,
-        timestamp: new Date(),
-      },
-    });
+    //     action: `CREATED UNIT ${unitNumber} IN BUILDING ${building.name}`,
+    //     timestamp: new Date(),
+    //   },
+    // });
 
     return res.status(201).json({
       success: true,
@@ -738,9 +722,7 @@ const createUnit = async (req, res) => {
       success: false,
       message: 'Internal server error',
     });
-  } finally {
-    await prisma.$disconnect();
-  }
+  } 
 };
 
 

@@ -210,12 +210,12 @@ const signin = async (req, res) => {
     });
 
     // Log the login action
-    await prisma.userActivity.create({
-      data: {
-        userId: user.id,
-        action: "LOGIN",
-      },
-    });
+    // await prisma.userActivity.create({
+    //   data: {
+    //     userId: user.id,
+    //     action: "LOGIN",
+    //   },
+    // });
 
 
 

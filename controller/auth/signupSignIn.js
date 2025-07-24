@@ -168,13 +168,6 @@ const register = async (req, res) => {
   }
 };
 
-module.exports = register;
-
-
-
-
-
-
 
 const signin = async (req, res) => {
   const { phoneNumber, password } = req.body;
@@ -247,7 +240,7 @@ const signin = async (req, res) => {
     // Generate a JWT token
     const token = jwt.sign(
       {
-        id: user.userId,
+        userId: user.id, // Fixed: use user.id instead of user.userId
         phoneNumber: user.phoneNumber,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -263,7 +256,7 @@ const signin = async (req, res) => {
     res.cookie('token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax', // Adjust for cross-origin
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
       maxAge: 24 * 60 * 60 * 1000, // 1 day
     });
 
@@ -286,6 +279,14 @@ const signin = async (req, res) => {
     await prisma.$disconnect();
   }
 };
+
+
+
+
+
+
+
+
 
 
 

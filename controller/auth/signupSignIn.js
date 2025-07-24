@@ -169,6 +169,7 @@ const register = async (req, res) => {
 };
 
 
+
 const signin = async (req, res) => {
   const { phoneNumber, password } = req.body;
 
@@ -240,7 +241,7 @@ const signin = async (req, res) => {
     // Generate a JWT token
     const token = jwt.sign(
       {
-        userId: user.id, // Fixed: use user.id instead of user.userId
+        id: user.id, // Fixed: use user.id instead of user.userId
         phoneNumber: user.phoneNumber,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -279,6 +280,7 @@ const signin = async (req, res) => {
     await prisma.$disconnect();
   }
 };
+
 
 
 

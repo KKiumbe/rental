@@ -99,7 +99,13 @@ async function settleInvoice() {
                         receipted: false,
                         createdAt: TransTime,
                         ref: BillRefNumber,
-                        tenantId, // Associate payment with tenant
+                        //tenantId,
+                       
+                        tenant: { connect: { id: tenantId } },
+
+                    
+                       
+                        
 
                     },
                 });

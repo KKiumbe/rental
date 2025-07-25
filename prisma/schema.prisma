@@ -427,8 +427,10 @@ model Payment {
   receiptId     String?
   receipted     Boolean       @default(false)
   ref           String?
-  customerId    String
+ 
   tenant        Tenant        @relation(fields: [tenantId], references: [id])
+
+
   receipt       Receipt?
   Invoice       Invoice[]     @relation("InvoiceToPayment")
 }

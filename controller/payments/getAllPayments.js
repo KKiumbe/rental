@@ -145,7 +145,7 @@ const getAllPayments = async (req, res) => {
           transactionId: true,
           ref: true,
           receiptId: true,
-          customerId: true,
+          
           createdAt: true,
           receipt: {
             select: {

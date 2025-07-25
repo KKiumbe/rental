@@ -18,142 +18,170 @@ const getCustomerDetails = async (req, res) => {
         id,
         tenantId,
       },
-      select: {
-        id: true,
-        tenantId: true,
-        firstName: true,
-        lastName: true,
-        email: true,
-        phoneNumber: true,
-        secondaryPhoneNumber: true,
-        nationalId: true,
-        status: true,
-        closingBalance: true,
-        leaseFileUrl: true,
-        leaseStartDate: true,
-        leaseEndDate: true,
-        createdAt: true,
-        updatedAt: true,
-
+      include: {
+        // Include all units through CustomerUnit relationship
+        CustomerUnit: {
+          where: {
+            isActive: true
+          },
+          include: {
+            unit: {
+              include: {
+                building: {
+                  include: {
+                    landlord: {
+                      select: {
+                        id: true,
+                        firstName: true,
+                        lastName: true,
+                        phoneNumber: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          orderBy: {
+            startDate: 'desc'
+          }
+        },
+        // Include the direct unit relationship for backward compatibility
         unit: {
+          include: {
+            building: {
+              include: {
+                landlord: {
+                  select: {
+                    id: true,
+                    firstName: true,
+                    lastName: true,
+                    phoneNumber: true
+                  }
+                }
+              }
+            }
+          }
+        },
+        // Include payments through receipts
+        receipts: {
           select: {
             id: true,
-            unitNumber: true,
-            monthlyCharge: true,
-            depositAmount: true,
-            status: true,
-            building: {
+            receiptNumber: true,
+            amount: true,
+            createdAt: true,
+            payment: {
               select: {
                 id: true,
-                name: true,
-                address: true,
-              },
-            },
+                modeOfPayment: true,
+                transactionId: true,
+                amount: true,
+                createdAt: true
+              }
+            }
           },
+          orderBy: { createdAt: 'desc' },
+          take: 10
         },
-
-        // invoices: {
-        //   select: {
-        //     id: true,
-        //     invoiceNumber: true,
-        //     invoiceAmount: true,
-        //     status: true,
-        //     createdAt: true,
-        //     updatedAt: true,
-        //     items: {
-        //       select: {
-        //         id: true,
-        //         description: true,
-        //         quantity: true,
-        //         amount: true,
-        //       },
-        //     },
-        //   },
-        //   orderBy: { createdAt: 'desc' },
-        //   take: 10,
-        // },
-
-        // receipts: {
-        //   select: {
-        //     id: true,
-        //     receiptNumber: true,
-        //     transactionCode: true,
-        //     amount: true,
-        //     paidBy: true,
-        //     createdAt: true,
-        //     payment: {
-        //       select: {
-        //         id: true,
-        //         modeOfPayment: true,
-        //         transactionId: true,
-        //         amount: true,
-        //         createdAt: true,
-        //       },
-        //     },
-        //   },
-        //   orderBy: { createdAt: 'desc' },
-        //   take: 10,
-        // },
-
-        // payments: {
-        //   select: {
-        //     id: true,
-        //     modeOfPayment: true,
-        //     transactionId: true,
-        //     amount: true,
-        //     createdAt: true,
-        //   },
-        //   orderBy: { createdAt: 'desc' },
-        //   take: 10,
-        // },
-
-        // deposits: {
-        //   select: {
-        //     id: true,
-        //     amount: true,
-        //     invoiceId: true,
-        //     createdAt: true,
-        //     updatedAt: true,
-        //   },
-        //   orderBy: { createdAt: 'desc' },
-        //   take: 10,
-        // },
-
-        // gasConsumptions: {
-        //   select: {
-        //     id: true,
-        //     period: true,
-        //     consumption: true,
-        //     reading: true,
-        //     createdAt: true,
-        //   },
-        //   orderBy: { period: 'desc' },
-        //   take: 10,
-        // },
-
-        // waterConsumptions: {
-        //   select: {
-        //     id: true,
-        //     period: true,
-        //     consumption: true,
-        //     reading: true,
-        //     createdAt: true,
-        //   },
-        //   orderBy: { period: 'desc' },
-        //   take: 10,
-        // },
-      },
+        invoices: {
+          select: {
+            id: true,
+            invoiceNumber: true,
+            invoiceAmount: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true,
+            InvoiceItem: {
+              select: {
+                id: true,
+                description: true,
+                amount: true,
+                quantity: true
+              }
+            }
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10
+        },
+        deposits: {
+          select: {
+            id: true,
+            amount: true,
+            status: true,
+            createdAt: true,
+            updatedAt: true
+          },
+          orderBy: { createdAt: 'desc' },
+          take: 10
+        },
+        gasConsumptions: {
+          select: {
+            id: true,
+            period: true,
+            consumption: true,
+            reading: true,
+            createdAt: true
+          },
+          orderBy: { period: 'desc' },
+          take: 10
+        },
+        waterConsumptions: {
+          select: {
+            id: true,
+            period: true,
+            consumption: true,
+            reading: true,
+            createdAt: true
+          },
+          orderBy: { period: 'desc' },
+          take: 10
+        }
+      }
     });
 
     if (!customer) {
       return res.status(404).json({ message: 'Customer not found or does not belong to this tenant' });
     }
 
-    const activeUnit = customer.unit;
-    const unitInfo = activeUnit || {};
+    // Combine both unit relationships (direct and through CustomerUnit)
+    const allUnits = [
+      ...(customer.unit ? [{
+        ...customer.unit,
+        isPrimary: true,
+        startDate: customer.leaseStartDate,
+        endDate: customer.leaseEndDate,
+        relationshipId: null
+      }] : []),
+      ...customer.CustomerUnit.map(cu => ({
+        ...cu.unit,
+        isPrimary: false,
+        startDate: cu.startDate,
+        endDate: cu.endDate,
+        isActive: cu.isActive,
+        relationshipId: cu.id
+      }))
+    ];
 
+    // Format payments from receipts
+    const payments = customer.receipts.map(receipt => ({
+      ...receipt.payment,
+      receiptNumber: receipt.receiptNumber
+    }));
+
+    // Format the response
     const formattedCustomer = {
-      ...customer,
+      id: customer.id,
+      firstName: customer.firstName,
+      lastName: customer.lastName,
+      email: customer.email,
+      phoneNumber: customer.phoneNumber,
+      secondaryPhoneNumber: customer.secondaryPhoneNumber,
+      nationalId: customer.nationalId,
+      status: customer.status,
+      closingBalance: customer.closingBalance,
+      leaseFileUrl: customer.leaseFileUrl,
+      createdAt: customer.createdAt,
+      updatedAt: customer.updatedAt,
       fullName: `${customer.firstName} ${customer.lastName}`.trim(),
       hasLease: !!customer.leaseFileUrl,
       leaseStatus: customer.leaseEndDate
@@ -163,26 +191,40 @@ const getCustomerDetails = async (req, res) => {
         : null,
       leaseStartDate: customer.leaseStartDate?.toISOString() || null,
       leaseEndDate: customer.leaseEndDate?.toISOString() || null,
-      unit: {
-        id: unitInfo.id,
-        unitNumber: unitInfo.unitNumber,
-        monthlyCharge: unitInfo.monthlyCharge,
-        depositAmount: unitInfo.depositAmount,
-        status: unitInfo.status,
-        buildingName: unitInfo.building?.name || null,
-        buildingAddress: unitInfo.building?.address || null,
-      },
-     //payments: customer.payments,
+      units: allUnits.map(unit => ({
+        id: unit.id,
+        unitNumber: unit.unitNumber,
+        monthlyCharge: unit.monthlyCharge,
+        depositAmount: unit.depositAmount,
+        status: unit.status,
+        isPrimary: unit.isPrimary,
+        isActive: unit.isActive,
+        relationshipId: unit.relationshipId,
+        startDate: unit.startDate?.toISOString() || null,
+        endDate: unit.endDate?.toISOString() || null,
+        building: {
+          id: unit.building.id,
+          name: unit.building.name,
+          address: unit.building.address,
+          landlord: unit.building.landlord
+        }
+      })),
+      invoices: customer.invoices,
+      payments: payments,
+      deposits: customer.deposits,
+      gasConsumptions: customer.gasConsumptions,
+      waterConsumptions: customer.waterConsumptions
     };
 
     res.status(200).json(formattedCustomer);
   } catch (error) {
     console.error('Error retrieving customer details:', error);
-    res.status(500).json({ message: 'Internal server error' });
+    res.status(500).json({ 
+      message: 'Internal server error',
+      error: error.message 
+    });
   }
 };
-
-
 
 
 async function deleteCustomer(req, res) {

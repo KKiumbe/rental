@@ -5,6 +5,7 @@ const { SearchInvoices, searchInvoicesByPhone, searchInvoicesByName } = require(
 const { addSmsJob } = require('../../controller/bulkSMS/sendSMSJob.js');
 const { cancelSystemGenInvoices } = require('../../controller/bill/cancelJob.js');
 const verifyToken = require('../../middleware/verifyToken.js');
+const { generateBuildingUtilityInvoices } = require('../../controller/bill/sharedutilitybill.js');
 
 const router = express.Router();
 
@@ -34,7 +35,12 @@ router.post('/send-bulk-sms', addSmsJob);
 // Route to generate invoices for all active customers for a specified month
 router.post('/invoices/generate', verifyToken,generateInvoices);
 
-router.post('/invoices-generate-day',generateInvoicesByDay)
+router.post('/invoices-generate-day',generateInvoicesByDay);
+
+
+router.post('/shared-utility-bill',verifyToken, generateBuildingUtilityInvoices);
+
+
 
 
 router.post('/invoices-generate-tenant',generateInvoicesPerTenant)
@@ -47,5 +53,10 @@ router.post('/generate-invoices-for-all',verifyToken, generateInvoicesForAll)
 // Route to cancel system-generated invoices for a specific customer and month
 router.patch('/invoices/cancel',verifyToken, cancelSystemGenInvoices);
 
+
+
+//shared utility bill
+
+//router.post('/shared-utility-bill',verifyToken, generateBuildingUtilityInvoices);
 
 module.exports = router;

@@ -215,7 +215,7 @@ const manualCashPayment = async (req, res) => {
             amount: paymentAmount,
             tenantId,
             modeOfPayment,
-            customerId,
+           
             firstName: paidBy,
             transactionId,
             receipted: true,

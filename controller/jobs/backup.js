@@ -23,7 +23,7 @@ console.log(`[${instanceId}] Starting backup service. PM2_NODE_ID=${process.env.
 const backupDatabase = async () => {
   try {
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupFile = path.join(BACKUP_DIR, `backup-${timestamp}.dump`);
+    const backupFile = path.join(BACKUP_DIR, `backup-rental-${timestamp}.dump`);
 
     // Ensure backup directory exists
     if (!(await fs.stat(BACKUP_DIR).catch(() => false))) {

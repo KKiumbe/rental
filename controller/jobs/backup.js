@@ -85,7 +85,7 @@ module.exports = () => {
     return;
   }
 
-  cron.schedule('* * * * *', () => {
+  cron.schedule('0 0 * * *', () => {
     console.log('Running task at:', new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' }));
     runTask();
   }, {

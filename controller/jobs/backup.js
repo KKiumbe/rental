@@ -152,7 +152,7 @@ module.exports = () => {
 //every 1 am in kenya 
 
   
-  cron.schedule('* * * * *', () => {
+  cron.schedule('0 1 * * * *', () => {
     console.log(`[${instanceId}] Triggering backup task at: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}`);
     runTask();
   }, {

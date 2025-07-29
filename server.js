@@ -38,6 +38,7 @@ const landlordRoute = require('./routes/landlord/landlordRoute.js')
 const utilitiesReadings = require('./routes/utilitiesReadingsRoute/utilitiesReadingRoute.js')
 
 const leaseRoute = require('./routes/leaseRoute/leaseRoute.js') //done
+const dropboxRoutes = require('./routes/dropboxcallback/callback.js')
 
 const taskRoute = require('./routes/tasks/tasks.js')
 const cookieParser = require('cookie-parser');
@@ -135,6 +136,22 @@ app.use('/api', utilitiesReadings); //done
 //lease termination routes
 app.use('/api', leaseRoute); //done
 
+app.use('/api', dropboxRoutes);
+
+
+app.get('/', (req, res) => {
+  const { code } = req.query;
+
+  if (!code) {
+    return res.send('No code found in query.');
+  }
+
+  res.send(`
+    <h2>✅ Dropbox Authorization Code</h2>
+    <p>Copy and paste this code into your terminal to exchange it for a refresh token:</p>
+    <code>${code}</code>
+  `);
+});
 
 
 // Start scheduled jobs

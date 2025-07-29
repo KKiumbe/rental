@@ -1,9 +1,12 @@
 const fs = require('fs');
 const { Dropbox } = require('dropbox');
 
-const accessToken= process.env.DROPBOX_ACCESS_TOKEN
-
-const dbx = new Dropbox({ accessToken });
+const dbx = new Dropbox({
+  clientId: process.env.DROPBOX_APP_KEY,
+  clientSecret: process.env.DROPBOX_APP_SECRET,
+  refreshToken: process.env.DROPBOX_REFRESH_TOKEN,
+  fetch, // required by the SDK
+});
 
 async function uploadToDropbox(filePath) {
   const contents = fs.readFileSync(filePath);
@@ -11,17 +14,14 @@ async function uploadToDropbox(filePath) {
 
   try {
     const response = await dbx.filesUpload({
-      path: `/${fileName}`, // ⬅️ Upload directly to root
+      path: `/${fileName}`,
       contents,
-      mode: { '.tag': 'overwrite' }, // safer overwrite config
+      mode: { '.tag': 'overwrite' },
     });
     console.log('✅ Uploaded:', response.result.name);
   } catch (error) {
     console.error('❌ Upload failed:', error?.error || error.message || error);
   }
 }
-
-
-
 
 module.exports = { uploadToDropbox };

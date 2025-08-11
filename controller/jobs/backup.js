@@ -96,69 +96,40 @@ const deleteOldBackups = async () => {
   }
 };
 
-const acquireLock = async () => {
-  const lockFile = path.join(BACKUP_DIR, 'backup.lock');
-  
-  try {
-    // Try to acquire lock with 10 second timeout and automatic release after 5 minutes
-    const release = await lockfile.lock(BACKUP_DIR, {
-      lockfilePath: lockFile,
-      retries: 3,
-      stale: 300000, // 5 minutes
-      update: 60000, // Update lock every minute
-      realpath: false
-    });
-    
-    console.log(`[${instanceId}] Acquired backup lock`);
-    return release;
-  } catch (error) {
-    if (error.code === 'ELOCKED') {
-      console.log(`[${instanceId}] Backup is already running in another instance`);
-      return null;
-    }
-    console.error(`[${instanceId}] Error acquiring lock: ${error.message}`);
-    return null;
-  }
-};
 
 const runTask = async () => {
-  const releaseLock = await acquireLock();
-  if (!releaseLock) return;
+ 
 
   try {
-    console.log(`[${instanceId}] Starting backup and cleanup task...`);
+ 
     await backupDatabase();
     await deleteOldBackups();
-    console.log(`[${instanceId}] Task completed successfully.`);
+    console.log(`[ Task completed successfully.`);
   } catch (error) {
-    console.error(`[${instanceId}] Task failed: ${error.message}`);
+    console.error(`[ Task failed to backup`);
   } finally {
-    if (releaseLock) {
-      try {
-        await releaseLock();
-        console.log(`[${instanceId}] Released backup lock`);
-      } catch (error) {
-        console.error(`[${instanceId}] Error releasing lock: ${error.message}`);
-      }
-    }
+    console.log(`[ Task completed successfully.`);
   }
 };
 
-module.exports = () => {
-  if (!DB_USER || !DB_PASSWORD || !DB_NAME || !DB_HOST || !BACKUP_DIR) {
-    console.error(`[${instanceId}] Missing required environment variables (DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, BACKUP_DIR).`);
-    return;
-  }
-//every 1 am in kenya 
+
+module.exports = { runTask };
+
+// module.exports = () => {
+//   if (!DB_USER || !DB_PASSWORD || !DB_NAME || !DB_HOST || !BACKUP_DIR) {
+//     console.error(`[${instanceId}] Missing required environment variables (DB_USER, DB_PASSWORD, DB_NAME, DB_HOST, BACKUP_DIR).`);
+//     return;
+//   }
+// //every 1 am in kenya 
 
   
-  cron.schedule('0 1 * * * *', () => {
-    console.log(`[${instanceId}] Triggering backup task at: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}`);
-    runTask();
-  }, {
-    scheduled: true,
-    timezone: 'Africa/Nairobi',
-  });
+//   cron.schedule('0 1 * * * *', () => {
+//     console.log(`[${instanceId}] Triggering backup task at: ${new Date().toLocaleString('en-US', { timeZone: 'Africa/Nairobi' })}`);
+//     runTask();
+//   }, {
+//     scheduled: true,
+//     timezone: 'Africa/Nairobi',
+//   });
 
-  console.log(`[${instanceId}] ✅ Scheduler started. Will run every 1 AM`);
-};
+//   console.log(`[${instanceId}] ✅ Scheduler started. Will run every 1 AM`);
+// };

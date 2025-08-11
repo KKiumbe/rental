@@ -5,7 +5,8 @@ const dbx = new Dropbox({
   clientId: process.env.DROPBOX_APP_KEY,
   clientSecret: process.env.DROPBOX_APP_SECRET,
   refreshToken: process.env.DROPBOX_REFRESH_TOKEN,
-  fetch, // required by the SDK
+  fetch, // required by the SDKls
+  
 });
 
 async function uploadToDropbox(filePath) {

@@ -155,7 +155,7 @@ app.get('/', (req, res) => {
 
 
 // Start scheduled jobs
-startBackup(); // Invoke the backup scheduler
+//startBackup(); // Invoke the backup scheduler
 //startInvoiceGen(); // Invoke if this script exports a function
 
 // Start the HTTP server

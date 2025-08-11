@@ -45,6 +45,9 @@ const getBuildingById = async (req, res) => {
   const tenantId = req.user?.tenantId;
   const { buildingId: id } = req.params;
 
+
+  console.log(`building id: ${id}`);
+
   if (!tenantId) {
     return res.status(400).json({ message: 'Tenant ID is required' });
   }
@@ -132,22 +135,29 @@ const getBuildingById = async (req, res) => {
       return res.status(404).json({ message: 'Building not found' });
     }
 
-    const formattedBuilding = {
-      ...building,
-      buildingName: building.name,
-      landlord: building.landlord
-        ? {
-            ...building.landlord,
-            name: `${building.landlord.firstName} ${building.landlord.lastName}`.trim(),
-          }
-        : null,
-      units: building.units.map((unit) => ({
-        ...unit,
-        customers: unit.CustomerUnit.map((cu) => cu.customer),
-        customerCount: unit.CustomerUnit.length,
-      })),
-      customerCount: building.units.reduce((sum, unit) => sum + unit.CustomerUnit.length, 0),
+  const formattedBuilding = {
+  ...building,
+  buildingName: building.name,
+  landlord: building.landlord
+    ? {
+        ...building.landlord,
+        name: `${building.landlord.firstName} ${building.landlord.lastName}`.trim(),
+      }
+    : null,
+  units: building.units.map((unit) => {
+    const activeCustomers = unit.CustomerUnit.map((cu) => cu.customer);
+    return {
+      ...unit,
+      customer: activeCustomers[0] || null, // Take first active customer if any
+      customerCount: activeCustomers.length,
     };
+  }),
+  customerCount: building.units.reduce(
+    (sum, unit) => sum + unit.CustomerUnit.length,
+    0
+  ),
+};
+
 
     res.status(200).json(formattedBuilding);
   } catch (error) {

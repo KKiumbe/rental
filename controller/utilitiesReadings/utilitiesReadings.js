@@ -20,113 +20,65 @@ const InvoiceStatus = {
 };
 
 
-const createWaterReading = async (req, res) => {
-  const { sendSMS } = require('../sms/sms.js');
-  const { customerId, reading, meterPhotoUrl } = req.body;
-  const { tenantId,  userId } = req.user;
-  const now = new Date();
-  const period = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, -3)); // EAT month start
 
-  // Validate required fields
+
+const createWaterReading = async (req, res) => {
+  const { customerId, reading, meterPhotoUrl } = req.body;
+  const { tenantId, userId, firstName, lastName } = req.user;
+  const now = new Date();
+  const period = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, -3)); // Start of month in EAT
+
   if (!customerId || reading === undefined) {
     return res.status(400).json({ message: 'Required fields: customerId, reading' });
   }
-
   if (isNaN(reading) || reading < 0) {
     return res.status(400).json({ message: 'Reading must be a non-negative number.' });
   }
 
   try {
-    // Set query timeout (5 seconds for localhost)
     await prisma.$executeRaw`SET statement_timeout = 5000`;
 
-    console.log(`Starting createWaterReading: customerId=${customerId}, reading=${reading}, period=${period.toISOString()}`);
+    // 🔹 Check duplicate reading for this period
+    const existingReading = await prisma.waterConsumption.findFirst({
+      where: { customerId, tenantId, period },
+    });
+    if (existingReading) {
+      return res.status(400).json({ message: 'Water reading already exists for this customer and period.' });
+    }
 
-    // Fetch customer with Unit and Building
+    // 🔹 Get customer & building
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
-      include: {
-        Building: true,
-        unit: { include: { building: true } },
-      },
+      include: { unit: { include: { building: true } } },
     });
-
     if (!customer || customer.tenantId !== tenantId) {
-      console.error(`Customer not found or tenant mismatch: customerId=${customerId}, tenantId=${tenantId}`);
       return res.status(404).json({ message: 'Customer not found or not in tenant.' });
     }
-
-    console.log(`Customer fetched: ${JSON.stringify(customer, null, 2)}`);
-
-
-
-
-    // Use unit.building (prefer over Customer.Building)
-    let building = customer.unit?.building;
-    if (!building && customer.Building?.length > 0) {
-      building = customer.Building[0];
-      console.log(`Using Customer.Building[0]: ${JSON.stringify(building, null, 2)}`);
-    }
-
+    const building = customer.unit?.building;
     if (!building) {
-      console.error(`No building found for customerId=${customerId}, unitId=${customer.unitId}`);
       return res.status(400).json({ message: 'No building associated with customer.' });
     }
 
-    console.log(`Building: id=${building.id}, billType=${building.billType}, waterRate=${building.waterRate}`);
-
-    // Validate waterRate early
-    if (building.billType === 'WATER_ONLY' && (!building.waterRate || building.waterRate <= 0)) {
-      console.error(`Invalid water rate: ${building.waterRate} for buildingId=${building.id}`);
-      return res.status(400).json({ message: `Invalid water rate (${building.waterRate}) for WATER_ONLY billing.` });
-    }
-
-    // Get previous reading
-    console.log(`Fetching previous reading for customerId=${customerId}`);
+    // 🔹 Previous reading
     const previous = await prisma.waterConsumption.findFirst({
       where: { customerId },
       orderBy: { period: 'desc' },
       select: { reading: true },
     });
-
-    // Calculate consumption
     const consumption = previous ? parseFloat(reading) - previous.reading : parseFloat(reading);
-
     if (previous && consumption < 0) {
-      console.error(`Invalid consumption: reading=${reading}, previous=${previous.reading}`);
       return res.status(400).json({ message: 'Current reading must be greater than previous reading.' });
     }
 
-    if (building.billType === 'WATER_ONLY' && consumption <= 0) {
-      console.error(`Invalid consumption for invoicing: ${consumption}`);
-      return res.status(400).json({ message: 'Consumption must be positive for WATER_ONLY billing.' });
-    }
-
-    // Get last 3 consumptions for abnormality check
-    console.log(`Fetching recent consumptions for customerId=${customerId}`);
-    const recent = await prisma.waterConsumption.findMany({
+    // 🔹 Detect abnormal
+    const avgResult = await prisma.waterConsumption.aggregate({
       where: { customerId },
-      orderBy: { period: 'desc' },
-      take: 3,
-      select: { consumption: true },
+      _avg: { consumption: true },
     });
+    const avg = avgResult._avg.consumption || 0;
+    const isAbnormal = avg > 0 && consumption > avg * 2;
 
-    let isNormal = true;
-    let avg = 0;
-    if (recent.length >= 3) {
-      avg = recent.reduce((sum, r) => sum + r.consumption, 0) / recent.length;
-      if (consumption > 2 * avg) {
-        isNormal = false;
-      }
-    }
-
-    console.log(`Consumption: ${consumption}, isNormal: ${isNormal}, avg: ${avg}`);
-
-    let result = {};
-    let smsError = null;
-
-    // Create water consumption record
-    console.log(`Creating water consumption record: customerId=${customerId}, period=${period.toISOString()}`);
+    // 🔹 Create WaterConsumption entry
     const waterReading = await prisma.waterConsumption.create({
       data: {
         customerId,
@@ -136,46 +88,52 @@ const createWaterReading = async (req, res) => {
         consumption,
         meterPhotoUrl: meterPhotoUrl || null,
         readById: userId,
-        createdAt: new Date(now.getTime() - 3 * 60 * 60 * 1000), // EAT: 03:48 PM, July 1, 2025
+        createdAt: new Date(now.getTime() - 3 * 60 * 60 * 1000), // store as EAT
       },
     });
 
-    result.waterReading = waterReading;
+    // 🔹 If abnormal → save & exit
+    if (isAbnormal) {
+      await prisma.abnormalWaterReading.create({
+        data: {
+          tenantId,
+          customerId,
+          reviewed: false,
+          resolved: false,
+          consumption,
+          meterPhotoUrl: meterPhotoUrl || null,
+          period,
+          readById: userId,
+          reading: parseFloat(reading),
+          WaterConsumption: { connect: { id: waterReading.id } },
+        },
+      });
 
-    if (isNormal && building.billType === 'WATER_ONLY') {
-      // Generate invoice for WATER_ONLY customers
-      const waterRate = building.waterRate;
-      const invoiceAmount = consumption * waterRate;
+      return res.status(201).json({
+        message: 'Abnormal water reading saved for review. No invoice generated.',
+        reading: waterReading,
+      });
+    }
 
-      console.log(`Calculated invoiceAmount: ${invoiceAmount} (consumption=${consumption}, waterRate=${waterRate})`);
+    // 🔹 Calculate invoice
+    const waterRate = building.waterRate || 0;
+    const invoiceAmount = consumption * waterRate;
+    const currentBalance = customer.closingBalance || 0;
+    const newBalance = currentBalance + invoiceAmount;
 
-      // Check for existing invoice
-      // console.log(`Checking for existing invoice: customerId=${customerId}, period=${period.toISOString()}`);
-      // const existingInvoice = await prisma.invoice.findFirst({
-      //   where: { customerId, invoicePeriod: period, tenantId },
-      // });
+    let status = InvoiceStatus.UNPAID;
+    let paidAmount = 0;
+    if (newBalance === 0) {
+      status = InvoiceStatus.PAID;
+      paidAmount = invoiceAmount;
+    } else if (newBalance > 0 && newBalance < invoiceAmount) {
+      status = InvoiceStatus.PPAID;
+      paidAmount = Math.abs(currentBalance);
+    }
 
-      // if (existingInvoice) {
-      //   console.error(`Invoice already exists: invoiceId=${existingInvoice.id}`);
-      //   return res.status(400).json({ message: 'Invoice already exists for this customer and period.' });
-      // }
-
-      const currentBalance = customer.closingBalance || 0;
-      const newBalance = currentBalance + invoiceAmount;
-
-      let status = InvoiceStatus.UNPAID;
-      let paidAmount = 0;
-      if (newBalance === 0) {
-        status = InvoiceStatus.PAID;
-        paidAmount = invoiceAmount;
-      } else if (newBalance > 0 && newBalance < invoiceAmount) {
-        status = InvoiceStatus.PPAID;
-        paidAmount = Math.abs(currentBalance);
-      }
-
-      console.log(`Creating invoice: customerId=${customerId}, unitId=${customer.unitId}, buildingId=${building.id}, amount=${invoiceAmount}, waterRate=${waterRate}`);
-
-      const invoice = await prisma.invoice.create({
+    // 🔹 Create invoice & update balance in a transaction
+    const invoice = await prisma.$transaction(async (tx) => {
+      const createdInvoice = await tx.invoice.create({
         data: {
           tenantId,
           customerId,
@@ -184,136 +142,54 @@ const createWaterReading = async (req, res) => {
           invoiceNumber: `INV-WTR-${Date.now()}`,
           invoiceAmount,
           amountPaid: paidAmount,
-          invoiceType: InvoiceType.WATER, // Use new enum
+          invoiceType: InvoiceType.WATER,
           status,
           closingBalance: invoiceAmount - paidAmount,
           isSystemGenerated: true,
-           //created by expect a string
-          createdBy: `${currentUser.firstName} ${currentUser.lastName}`,
-
-          
+          createdBy: `${firstName} ${lastName}`,
           InvoiceItem: {
             create: {
               description: `Water consumption: ${consumption} units`,
               amount: invoiceAmount,
               quantity: 1,
-             
             },
           },
         },
       });
 
-      console.log(`Updating customer balance: customerId=${customerId}, newBalance=${newBalance}`);
-      await prisma.customer.update({
+      await tx.customer.update({
         where: { id: customerId },
         data: { closingBalance: newBalance },
       });
 
-      result.invoice = invoice;
-    } else if (!isNormal) {
-      // Save abnormal reading
-      console.log(`Creating abnormal reading: waterConsumptionId=${waterReading.id}`);
-   
-      const abnormal = await prisma.abnormalWaterReading.create({
-  data: {
-    customerId,
-    tenantId,
-    period,
-    reading: parseFloat(reading),
-    consumption,
-    meterPhotoUrl: meterPhotoUrl || null,
-    readById: userId,
-    reviewNotes: `Consumption (${consumption} m³) exceeds 2x average (${avg.toFixed(2)} m³)`,
-    resolved: false,
-    reviewed: false,
-    createdAt: new Date(now.getTime() - 3 * 60 * 60 * 1000), // EAT
-  },
-});
-
-
-      result.abnormalReading = abnormal;
-    } else {
-      console.log(`No invoice created: building.billType=${building.billType} is not WATER_ONLY`);
-    }
-
-    // Send SMS with retries (3 attempts, 2-second timeout each)
-    if (customer.phoneNumber) {
-      const periodString = `${period.getFullYear()}-${String(period.getMonth() + 1).padStart(2, '0')}`;
-      const message = isNormal
-        ? `Dear ${customer.firstName}, your water meter was read for period ${periodString}: ${consumption} units consumed. Invoice: KES ${result.invoice?.invoiceAmount || 0}, Balance: KES ${result.invoice?.closingBalance || customer.closingBalance}.`
-        : `Dear ${customer.firstName}, your water meter was read for period ${periodString}: ${consumption} units consumed. Flagged as abnormal (exceeds 2x average of ${avg.toFixed(2)} m³).`;
-
-      console.log(`Attempting SMS to ${customer.phoneNumber}: ${message}`);
-
-      let smsSuccess = false;
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-          const smsResponse = await Promise.race([
-            sendSMS(tenantId, customer.phoneNumber, message),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('SMS timeout')), 2000)),
-          ]);
-          if (smsResponse.success) {
-            smsSuccess = true;
-            console.log(`SMS sent successfully on attempt ${attempt}`);
-            break;
-          } else {
-            smsError = `SMS failed on attempt ${attempt}: ${smsResponse.error || 'Unknown error'}`;
-            console.warn(smsError);
-          }
-        } catch (err) {
-          smsError = `SMS failed on attempt ${attempt}: ${err.message}`;
-          console.warn(smsError);
-        }
-      }
-
-      if (!smsSuccess) {
-        smsError = smsError || 'All SMS attempts failed.';
-        console.error(smsError);
-      }
-    } else {
-      smsError = 'No phone number available for SMS.';
-      console.warn(smsError);
-    }
-
-    // Log activity (optimized to reduce data size)
-    console.log(`Logging activity for waterConsumptionId=${waterReading.id}`);
-    await prisma.userActivity.create({
-      data: {
-        user: { connect: { id: userId } },
-        tenant: { connect: { id: tenantId } },
-        customer: { connect: { id: customerId } },
-        action: 'Created water reading',
-        details: {
-          waterConsumptionId: waterReading.id,
-          reading,
-          consumption,
-          period: period.toISOString(),
-          isNormal,
-          invoiceId: result.invoice?.id || null,
-          invoiceAmount: result.invoice?.invoiceAmount || null,
-          waterRate: building?.waterRate || null,
-          unitId: customer.unitId || null,
-          buildingId: building?.id || null,
-          smsError: smsError || null,
-        },
-        timestamp: new Date(now.getTime() - 3 * 60 * 60 * 1000), // EAT
-      },
+      return createdInvoice;
     });
 
+    // 🔹 Send SMS notification
+    try {
+      const smsMessage = `Dear ${customer.firstName}, your Water Bill:
+Prev reading: ${previous?.reading ?? 0} units
+Current reading: ${reading} units , Consumption: ${consumption} units, rate: ${waterRate.toFixed(2)}
+Invoice amount: ${invoiceAmount.toFixed(2)}`;
+      await sendSms({
+        to: customer.phoneNumber, // must exist in DB
+        message: smsMessage,
+      });
+    } catch (smsErr) {
+      console.error('SMS send failed:', smsErr);
+    }
+
+    // ✅ Response
     res.status(201).json({
-      message: isNormal ? 'Normal reading saved.' : 'Abnormal reading saved.',
-      reading: result.waterReading,
-      invoice: result.invoice || null,
-      abnormalReading: result.abnormalReading || null,
-      smsError: smsError || null,
+      message: 'Water reading and invoice created successfully.',
+      reading: waterReading,
+      invoice,
     });
+
   } catch (err) {
-    console.error('Error creating water reading:', err, { code: err.code, meta: err.meta });
+    console.error('Error creating water reading:', err);
     if (err.code === 'P2002') {
-      return res.status(400).json({ message: 'Water reading or invoice already exists for this customer and period.' });
-    }
-    if (err.message.includes('timeout')) {
-      return res.status(504).json({ message: 'Database query timed out.' });
+      return res.status(400).json({ message: 'Duplicate water reading for this customer and period.' });
     }
     res.status(500).json({ message: 'Internal server error' });
   } finally {
@@ -322,64 +198,75 @@ const createWaterReading = async (req, res) => {
   }
 };
 
-  const getAllWaterReadings = async (req, res) => {
-    const { tenantId } = req.user; 
-    let { page = 1, limit = 20 } = req.query;
 
-    page = parseInt(page);
-    limit = parseInt(limit);
+const getAllWaterReadings = async (req, res) => {
+  const { tenantId } = req.user;
+  let { page = 1, limit = 20 } = req.query;
 
-    if (isNaN(page) || page < 1) page = 1;
-    if (isNaN(limit) || limit < 1) limit = 20;
+  page = parseInt(page);
+  limit = parseInt(limit);
 
-    const skip = (page - 1) * limit;
+  if (isNaN(page) || page < 1) page = 1;
+  if (isNaN(limit) || limit < 1) limit = 20;
 
-    try {
-     const [readings, totalCount] = await Promise.all([
-  prisma.waterConsumption.findMany({
-    where: { tenantId },
-    orderBy: { createdAt: 'desc' },
-    skip,
-    take: limit,
-    include: {
-      customer: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          phoneNumber: true,
-          unitId: true
-        }
-      },
-      readBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true
-        }
-      }
-    }
-  }),
-  prisma.waterConsumption.count({
-    where: { tenantId }
-  })
-]);
+  const skip = (page - 1) * limit;
 
-       
+  try {
+    const [readings, totalCount] = await Promise.all([
+      prisma.waterConsumption.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          customer: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              phoneNumber: true,
+              unitId: true,
+            },
+          },
+          User: {  // ✅ this matches your model relation
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+      }),
+      prisma.waterConsumption.count({
+        where: { tenantId },
+      }),
+    ]);
 
-      res.status(200).json({
-        page,
-        limit,
-        totalPages: Math.ceil(totalCount / limit),
-        totalCount,
-        data: readings
-      });
+     console.log(`this are the readings ${JSON.stringify(readings)}`);
 
-    } catch (err) {
-      console.error("Error fetching water readings:", err);
-      res.status(500).json({ message: "Failed to fetch water readings" });
-    }
-  };
+     const waterMeterReadBy = await prisma.user.findFirst({
+       where: { id: readings[0]?.readById },
+       select: {
+         id: true,
+         firstName: true,
+         lastName: true,
+       },
+     })
+
+    res.status(200).json({
+      page,
+      limit,
+      totalPages: Math.ceil(totalCount / limit),
+      totalCount,
+      data: readings.map((reading) => ({ ...reading, readBy: waterMeterReadBy})), // add readBy property to each readings,
+    });
+
+   
+  } catch (err) {
+    console.error("Error fetching water readings:", err);
+    res.status(500).json({ message: "Failed to fetch water readings" });
+  }
+};
 
 
 
@@ -420,7 +307,7 @@ const getAllAbnormalWaterReadings = async (req, res) => {
               unitId: true
             }
           },
-          readBy: {
+          User: {
             select: {
               id: true,
               firstName: true,
@@ -434,12 +321,24 @@ const getAllAbnormalWaterReadings = async (req, res) => {
       })
     ]);
 
+    const waterMeterReadBy = await prisma.user.findUnique({
+      where: { id: abnormalReadings[0]?.readById },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true
+      }
+    })
+
+
+    console.log(`abnormalReadings ${JSON.stringify(abnormalReadings)}`);
+
     res.status(200).json({
       page,
       limit,
       totalPages: Math.ceil(totalCount / limit),
       totalCount,
-      data: abnormalReadings
+      data: abnormalReadings.map((reading) => ({ ...reading, readBy: waterMeterReadBy }))
     });
   } catch (err) {
     console.error("Error fetching abnormal water readings:", err);

@@ -5,7 +5,7 @@ const configureTenantSettings = async (tenantId) => {
   // Hardcoded SMS Configuration Values
   const smsConfigData = {
     partnerId: "11914",
-    apiKey: "43e4e97130d5a2d886667c2d40ce48df",
+    apiKey: "f43aac1ce8fa73bf1adcdaa44443798e",
     shortCode: "TAQAMALI",
     customerSupportPhoneNumber: "0702550190",
   };

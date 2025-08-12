@@ -1167,7 +1167,7 @@ const getMeterReadingDetails = async (req, res) => {
     if (reading && !isAbnormal) {
       const abnormalRecord = await prisma.abnormalWaterReading.findFirst({
         where: {
-          customerId: reading.customer.id,
+          customerId: reading.customer?.id,
           period: reading.period,
           tenantId: parseInt(tenantId)
         }
@@ -1194,7 +1194,7 @@ const getMeterReadingDetails = async (req, res) => {
     // Average consumption (last 3)
     const normalReadings = await prisma.waterConsumption.findMany({
       where: {
-        customerId: reading.customer.id,
+        customerId: reading?.customer.id,
         tenantId: parseInt(tenantId)
       },
       orderBy: { period: 'desc' },

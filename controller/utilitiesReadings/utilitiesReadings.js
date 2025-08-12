@@ -216,7 +216,7 @@ const getAllWaterReadings = async (req, res) => {
   const skip = (page - 1) * limit;
 
   try {
-    const [readings, totalCount] = await Promise.all([
+    const [normalReadings, normalCount, abnormalReadings, abnormalCount] = await Promise.all([
       prisma.waterConsumption.findMany({
         where: { tenantId },
         orderBy: { createdAt: 'desc' },
@@ -232,43 +232,62 @@ const getAllWaterReadings = async (req, res) => {
               unitId: true,
             },
           },
-          User: {  // ✅ this matches your model relation
+          User: {
+            select: { id: true, firstName: true, lastName: true },
+          },
+        },
+      }),
+      prisma.waterConsumption.count({ where: { tenantId } }),
+
+      prisma.abnormalWaterReading.findMany({
+        where: { tenantId },
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: limit,
+        include: {
+          Customer: {
             select: {
               id: true,
               firstName: true,
               lastName: true,
+              phoneNumber: true,
+              unitId: true,
             },
+          },
+          User: {
+            select: { id: true, firstName: true, lastName: true },
           },
         },
       }),
-      prisma.waterConsumption.count({
-        where: { tenantId },
-      }),
+      prisma.abnormalWaterReading.count({ where: { tenantId } }),
     ]);
 
-     console.log(`this are the readings ${JSON.stringify(readings)}`);
-
-     const waterMeterReadBy = await prisma.user.findFirst({
-       where: { id: readings[0]?.readById },
-       select: {
-         id: true,
-         firstName: true,
-         lastName: true,
-       },
-     })
-
     res.status(200).json({
+      success: true,
       page,
       limit,
-      totalPages: Math.ceil(totalCount / limit),
-      totalCount,
-      data: readings.map((reading) => ({ ...reading, readBy: waterMeterReadBy})), // add readBy property to each readings,
+      normal: {
+        totalPages: Math.ceil(normalCount / limit),
+        totalCount: normalCount,
+        data: normalReadings.map(r => ({
+          ...r,
+          type: 'normal',
+          customerName: `${r.customer.firstName} ${r.customer.lastName || ''}`.trim(),
+        })),
+      },
+      abnormal: {
+        totalPages: Math.ceil(abnormalCount / limit),
+        totalCount: abnormalCount,
+        data: abnormalReadings.map(r => ({
+          ...r,
+          type: 'abnormal',
+          customerName: `${r.Customer.firstName} ${r.Customer.lastName || ''}`.trim(),
+        })),
+      },
     });
-
-   
   } catch (err) {
     console.error("Error fetching water readings:", err);
-    res.status(500).json({ message: "Failed to fetch water readings" });
+    res.status(500).json({ success: false, message: "Failed to fetch water readings" });
   }
 };
 

@@ -109,7 +109,7 @@ const createWaterReading = async (req, res) => {
           readById: userId,
           updatedAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
           reading: parseFloat(reading),
-          WaterConsumption: { connect: { id: waterReading.id } },
+         
         },
       });
 

@@ -368,7 +368,7 @@ model WaterConsumption {
   customer             Customer               @relation(fields: [customerId], references: [id], onDelete: Cascade)
   User                 User?                  @relation(fields: [readById], references: [id])
   tenant               Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  AbnormalWaterReading AbnormalWaterReading[] @relation("AbnormalWaterReadingToWaterConsumption")
+  //AbnormalWaterReading AbnormalWaterReading[] @relation("AbnormalWaterReadingToWaterConsumption")
 
   @@index([customerId, period])
 }
@@ -552,7 +552,7 @@ model LeaseTermination {
 }
 
 model AbnormalWaterReading {
-  id               String                @id
+  id               String                @id @default(uuid())
   tenantId         Int
   reviewed         Boolean               @default(false)
   reviewNotes      String?
@@ -569,7 +569,7 @@ model AbnormalWaterReading {
   Customer         Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
   User             User?                 @relation(fields: [readById], references: [id])
   Tenant           Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  WaterConsumption WaterConsumption[]    @relation("AbnormalWaterReadingToWaterConsumption")
+  //WaterConsumption WaterConsumption[]    @relation("AbnormalWaterReadingToWaterConsumption")
 }
 
 model PaymentLink {

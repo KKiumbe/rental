@@ -276,7 +276,6 @@ const getAllAbnormalWaterReadings = async (req, res) => {
   let { tenantId } = req.user;
   let { page = 1, limit = 20 } = req.query;
 
-  // Validate and parse tenantId
   tenantId = parseInt(tenantId);
   if (isNaN(tenantId)) {
     return res.status(400).json({ message: "Invalid tenantId" });
@@ -284,7 +283,6 @@ const getAllAbnormalWaterReadings = async (req, res) => {
 
   page = parseInt(page);
   limit = parseInt(limit);
-
   if (isNaN(page) || page < 1) page = 1;
   if (isNaN(limit) || limit < 1) limit = 20;
 
@@ -298,7 +296,14 @@ const getAllAbnormalWaterReadings = async (req, res) => {
         skip,
         take: limit,
         include: {
-          customer: {
+          User: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true
+            }
+          },
+          Customer: {
             select: {
               id: true,
               firstName: true,
@@ -306,39 +311,22 @@ const getAllAbnormalWaterReadings = async (req, res) => {
               phoneNumber: true,
               unitId: true
             }
-          },
-          User: {
-            select: {
-              id: true,
-              firstName: true,
-              lastName: true
-            }
           }
         }
       }),
-      prisma.abnormalWaterReading.count({
-        where: { tenantId }
-      })
+      prisma.abnormalWaterReading.count({ where: { tenantId } })
     ]);
-
-    const waterMeterReadBy = await prisma.user.findUnique({
-      where: { id: abnormalReadings[0]?.readById },
-      select: {
-        id: true,
-        firstName: true,
-        lastName: true
-      }
-    })
-
-
-    console.log(`abnormalReadings ${JSON.stringify(abnormalReadings)}`);
 
     res.status(200).json({
       page,
       limit,
       totalPages: Math.ceil(totalCount / limit),
       totalCount,
-      data: abnormalReadings.map((reading) => ({ ...reading, readBy: waterMeterReadBy }))
+      data: abnormalReadings.map((reading) => ({
+        ...reading,
+        readBy: reading.User,
+        customer: reading.Customer
+      }))
     });
   } catch (err) {
     console.error("Error fetching abnormal water readings:", err);

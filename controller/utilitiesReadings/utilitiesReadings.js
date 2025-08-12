@@ -98,6 +98,7 @@ const createWaterReading = async (req, res) => {
     if (isAbnormal) {
       await prisma.abnormalWaterReading.create({
         data: {
+        
           tenantId,
           customerId,
           reviewed: false,
@@ -106,6 +107,7 @@ const createWaterReading = async (req, res) => {
           meterPhotoUrl: meterPhotoUrl || null,
           period,
           readById: userId,
+          updatedAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
           reading: parseFloat(reading),
           WaterConsumption: { connect: { id: waterReading.id } },
         },

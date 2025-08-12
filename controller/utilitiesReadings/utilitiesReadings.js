@@ -1133,7 +1133,7 @@ const searchAbnormalWaterReadingsByName = async (req, res) => {
 const getMeterReadingDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const { tenantId } = req.query;
+    const { tenantId } = req.user;
 
     if (!tenantId) {
       return res.status(400).json({ success: false, data: null, message: 'tenantId is required' });

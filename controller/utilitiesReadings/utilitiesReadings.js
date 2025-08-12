@@ -42,9 +42,11 @@ const createWaterReading = async (req, res) => {
     const existingReading = await prisma.waterConsumption.findFirst({
       where: { customerId, tenantId, period },
     });
-    if (existingReading) {
-      return res.status(400).json({ message: 'Water reading already exists for this customer and period.' });
-    }
+
+    console.log(`there is existingReading ${existingReading}`);
+    // if (existingReading) {
+    //   return res.status(400).json({ message: 'Water reading already exists for this customer and period.' });
+    // }
 
     // 🔹 Get customer & building
     const customer = await prisma.customer.findUnique({

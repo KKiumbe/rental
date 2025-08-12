@@ -6,7 +6,9 @@ const verifyToken = require('../../middleware/verifyToken.js');
 const { createWaterReading, createGasReading, getAllAbnormalWaterReadings, getAllWaterReadings, reviewAbnormalWaterReading, resolveAbnormalWaterReading, manualUpdateMeterReading, getWaterReadingsByCustomer 
 
 , searchWaterReadingsByPhone, searchAbnormalWaterReadingsByPhone, searchWaterReadingsByName, searchAbnormalWaterReadingsByName,
-getMeterReadingDetails
+getMeterReadingDetails,
+getAbnormalReadingDetails,
+getNormalReadingDetails
 } = require('../../controller/utilitiesReadings/utilitiesReadings.js');
 
 
@@ -50,7 +52,9 @@ router.get('/water-readings/search-by-name', verifyToken, searchWaterReadingsByN
 // GET /api/abnormal-water-readings/search-by-name
 router.get('/abnormal-water-readings/search-by-name', verifyToken, searchAbnormalWaterReadingsByName);
 
-router.get('/meter-reading/:id',verifyToken, getMeterReadingDetails);
+router.get('/meter-reading/normal/:id', verifyToken, getNormalReadingDetails);
+router.get('/meter-reading/abnormal/:id', verifyToken, getAbnormalReadingDetails);
+
 
 
 module.exports = router;

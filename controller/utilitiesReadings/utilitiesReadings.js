@@ -1136,34 +1136,41 @@ const getMeterReadingDetails = async (req, res) => {
     const { tenantId } = req.user;
 
     if (!tenantId) {
-      return res.status(400).json({ success: false, data: null, message: 'tenantId is required' });
+      return res.status(400).json({ success: false, message: 'tenantId is required' });
     }
 
+    // Try normal reading first
     let reading = await prisma.waterConsumption.findUnique({
       where: { id },
       include: {
         customer: { select: { id: true, firstName: true, lastName: true } },
-        readBy: { select: { firstName: true, lastName: true } },
-      },
+        User: { select: { firstName: true, lastName: true } }
+      }
     });
 
     let isAbnormal = false;
     let anomalyDetails = null;
 
+    // If not found in normal, check abnormal
     if (!reading) {
       reading = await prisma.abnormalWaterReading.findUnique({
         where: { id },
         include: {
-          customer: { select: { id: true, firstName: true, lastName: true } },
-          readBy: { select: { firstName: true, lastName: true } },
-        },
+          Customer: { select: { id: true, firstName: true, lastName: true } },
+          User: { select: { firstName: true, lastName: true } }
+        }
       });
-      isAbnormal = !!reading;
+      if (reading) isAbnormal = true;
     }
 
+    // If normal reading found, check if it has a matching abnormal record for same customer+period
     if (reading && !isAbnormal) {
       const abnormalRecord = await prisma.abnormalWaterReading.findFirst({
-        where: { id, tenantId: parseInt(tenantId) },
+        where: {
+          customerId: reading.customer.id,
+          period: reading.period,
+          tenantId: parseInt(tenantId)
+        }
       });
       if (abnormalRecord) {
         isAbnormal = true;
@@ -1171,59 +1178,56 @@ const getMeterReadingDetails = async (req, res) => {
           reviewed: abnormalRecord.reviewed,
           reviewNotes: abnormalRecord.reviewNotes,
           action: abnormalRecord.action,
-          resolved: abnormalRecord.resolved,
-          anomalyReason: await computeAnomalyReason(abnormalRecord),
+          resolved: abnormalRecord.resolved
         };
       }
     }
 
     if (!reading) {
-      return res.status(404).json({ success: false, data: null, message: 'Meter reading not found' });
+      return res.status(404).json({ success: false, message: 'Meter reading not found' });
     }
 
     if (reading.tenantId !== parseInt(tenantId)) {
-      return res.status(403).json({ success: false, data: null, message: 'Unauthorized access to reading' });
+      return res.status(403).json({ success: false, message: 'Unauthorized access' });
     }
 
-    // Always fetch average consumption from WaterConsumption using customerId
+    // Average consumption (last 3)
     const normalReadings = await prisma.waterConsumption.findMany({
       where: {
         customerId: reading.customer.id,
-        tenantId: parseInt(tenantId),
+        tenantId: parseInt(tenantId)
       },
       orderBy: { period: 'desc' },
-      take: 3,
+      take: 3
     });
 
-    let averageConsumption = null;
+    let avgConsumption = null;
     if (normalReadings.length > 0) {
-      const totalConsumption = normalReadings.reduce((sum, r) => sum + (r.consumption || 0), 0);
-      averageConsumption = totalConsumption / normalReadings.length;
+      avgConsumption =
+        normalReadings.reduce((sum, r) => sum + (r.consumption || 0), 0) / normalReadings.length;
     }
 
-    const formattedReading = {
-      id: reading.id,
-      type: isAbnormal ? 'abnormal' : 'normal',
-      customerId: reading.customerId,
-      customerName: `${reading.customer.firstName} ${reading.customer.lastName || ''}`.trim(),
-      tenantId: reading.tenantId,
-      period: reading.period,
-      reading: reading.reading,
-      consumption: reading.consumption,
-      meterPhotoUrl: reading.meterPhotoUrl,
-      readById: reading.readById,
-      readByName: reading.readBy ? `${reading.readBy.firstName} ${reading.readBy.lastName || ''}`.trim() : null,
-      createdAt: reading.createdAt,
-      updatedAt: reading.updatedAt,
-      isAbnormal,
-      anomalyDetails,
-      averageConsumption: averageConsumption !== null ? parseFloat(averageConsumption.toFixed(2)) : null,
-    };
-
-    res.json({ success: true, data: formattedReading, message: null });
+    res.json({
+      success: true,
+      data: {
+        id: reading.id,
+        type: isAbnormal ? 'abnormal' : 'normal',
+        customerId: reading.customer?.id || reading.Customer?.id,
+        customerName: `${reading.customer?.firstName || reading.Customer?.firstName} ${reading.customer?.lastName || reading.Customer?.lastName || ''}`.trim(),
+        tenantId: reading.tenantId,
+        period: reading.period,
+        reading: reading.reading,
+        consumption: reading.consumption,
+        meterPhotoUrl: reading.meterPhotoUrl,
+        readByName: reading.User ? `${reading.User.firstName} ${reading.User.lastName}` : null,
+        isAbnormal,
+        anomalyDetails,
+        averageConsumption: avgConsumption !== null ? parseFloat(avgConsumption.toFixed(2)) : null
+      }
+    });
   } catch (error) {
     console.error('Error fetching meter reading:', error);
-    res.status(500).json({ success: false, data: null, message: error.message });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

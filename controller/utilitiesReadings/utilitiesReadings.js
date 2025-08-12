@@ -1212,8 +1212,8 @@ const getMeterReadingDetails = async (req, res) => {
       data: {
         id: reading.id,
         type: isAbnormal ? 'abnormal' : 'normal',
-        customerId: reading.customer?.id || reading.Customer?.id,
-        customerName: `${reading.customer?.firstName || reading.Customer?.firstName} ${reading.customer?.lastName || reading.Customer?.lastName || ''}`.trim(),
+        customerId: reading.customer?.id || reading.customer?.id,
+        customerName: `${reading.customer?.firstName || reading.customer?.firstName} ${reading.customer?.lastName || reading.customer?.lastName || ''}`.trim(),
         tenantId: reading.tenantId,
         period: reading.period,
         reading: reading.reading,
